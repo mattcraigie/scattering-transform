@@ -128,5 +128,5 @@ class ScatteringTransformFast:
         post_cut_size = result.numel()
         cut_factor = post_cut_size / pre_cut_size
         print("whatttt")
-        return result, cut_factor
+        return
 
