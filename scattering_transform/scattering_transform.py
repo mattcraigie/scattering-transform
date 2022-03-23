@@ -26,12 +26,12 @@ class ScatteringTransformFull:
         self.I2 = torch.zeros((batch_size, self.J, self.L, self.J, self.L, self.size_x, self.size_y), dtype=torch.complex64)
 
         # cheeky dimension tricks to avoid loops and go 10% faster -- does not filter out j2 > j1 though
-        product1 = I0_k[:, None, None, ...] * self.filters.filter_set_k
+        product1 = I0_k[:, None, None, ...] * self.filters.filters_k
         self.I1 = torch.fft.ifftn(product1, dim=(-1, -2)).abs()
         I1_k = torch.fft.fftn(self.I1, dim=(-1, -2))
 
 
-        product2 = I1_k[..., None, None, :, :] * self.filters.filter_set_k
+        product2 = I1_k[..., None, None, :, :] * self.filters.filters_k
         self.I2 = torch.fft.ifftn(product2, dim=(-1, -2)).abs()
 
         return self.calculate_scattering_coefficients()
@@ -62,7 +62,6 @@ class ScatteringTransformFast:
         self.L = filters.L
         self.size_x, self.size_y = filters.size, filters.size
         self.filters = filters
-        self.filters_cut, self.cut_factors = self.apply_filter_cut(self.filters.filter_set_k)
 
     def run(self, input_fields):
         """Perform the scattering transform"""
@@ -76,10 +75,11 @@ class ScatteringTransformFast:
         self.S2 = torch.full((batch_size, self.J, self.L, self.J, self.L), torch.nan)
 
         for j1 in range(self.J):
-            I0_k_cut = self.cut_high_k_off(I0_k, j=j1)
-            product = I0_k_cut[:, None, :, :] * self.filters_cut[j1]
+            print(self.cut_high_k_off(I0_k, j=j1))
+            I0_k_cut, cut_factor = self.cut_high_k_off(I0_k, j=j1)
+            product = I0_k_cut[:, None, :, :] * self.filters.filters_cut[j1]
             I1_j1 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
-            self.S1[:, j1] = torch.mean(I1_j1, dim=(-2, -1)) * self.cut_factors[j1]
+            self.S1[:, j1] = torch.mean(I1_j1, dim=(-2, -1)) * cut_factor
 
             I1_j1_k = torch.fft.fftn(I1_j1, dim=(-2, -1))
 
@@ -92,15 +92,11 @@ class ScatteringTransformFast:
                     else:
                         factor = j2
 
-                    I1_j1_k_cut = self.cut_high_k_off(I1_j1_k, j=factor)
-                    product = I1_j1_k_cut[:, :, None, :, :] * self.filters_cut[j2][None, None, :, :, :]
+                    I1_j1_k_cut, cut_factor = self.cut_high_k_off(I1_j1_k, j=factor)
+                    product = I1_j1_k_cut[:, :, None, :, :] * self.filters.filters_cut[j2][None, None, :, :, :]
                     I2_j1j2 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
 
-                    # if j1 == 2:
-                    #     print(j2)
-                    #     show_items([I2_j1j2[0].sum((0, 1))])
-
-                    self.S2[:, j1, :, j2, :] = torch.mean(I2_j1j2, dim=(-2, -1)) * self.cut_factors[j2]
+                    self.S2[:, j1, :, j2, :] = torch.mean(I2_j1j2, dim=(-2, -1)) * cut_factor
 
         self.s0 = self.S0
         self.s1 = torch.mean(self.S1, dim=-1)
@@ -108,15 +104,6 @@ class ScatteringTransformFast:
 
         return self.s0, self.s1, self.s2
 
-    def apply_filter_cut(self, filters):
-        filters_cut = []
-        cut_factors = []
-        for j in range(self.J):
-            pre_cut_size = filters[j].numel()
-            filters_cut.append(self.cut_high_k_off(filters[j], j))
-            post_cut_size = filters_cut[j].numel()
-            cut_factors.append(post_cut_size / pre_cut_size)
-        return filters_cut, cut_factors
 
     def cut_high_k_off(self, data_k, j=1):
         if j <= 1:
@@ -127,6 +114,7 @@ class ScatteringTransformFast:
         dx = int(max(16, min(np.ceil(M / 2 ** j), M // 2)))
         dy = int(max(16, min(np.ceil(N / 2 ** j), N // 2)))
 
+        pre_cut_size = data_k.numel()
 
         result = torch.cat(
             (torch.cat(
@@ -137,6 +125,8 @@ class ScatteringTransformFast:
                   ), -2)
             ), -1)
 
-
-        return result
+        post_cut_size = result.numel()
+        cut_factor = post_cut_size / pre_cut_size
+        print("whatttt")
+        return result, cut_factor
 

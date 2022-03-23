@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 
 class WaveletsMorlet(object):
@@ -6,13 +7,17 @@ class WaveletsMorlet(object):
     Standard Morlet Wavelet. Go to, because it has all the properties of a Gabor filter and satisfies the admissibility
     criteria.
     """
-    def __init__(self, image_size, J, L):
+    def __init__(self, image_size, J, L, make_filters=True):
         self.size = image_size
         self.J = J
         self.L = L
         self.x_grid = self._get_x_grid()
-        self.filter_set_x = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
-        self.filter_set_k = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
+        self.filters_x = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
+        self.filters_k = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
+
+        if make_filters:
+            self.make_filters()
+
 
     def morlet_wavelet_jl(self, j, l):
         """Morlet wavelet constructed directly using j and l with a varied k0 and sigma, as per kymatio"""
@@ -36,12 +41,13 @@ class WaveletsMorlet(object):
 
         return morlet
 
-    def make_filter_set(self):
+    def make_filters(self):
         for j in range(self.J):
             for l in range(self.L):
-                self.filter_set_x[j, l] = self.morlet_wavelet_jl(j, l)
-                self.filter_set_k[j, l] = torch.fft.fft2(torch.fft.fftshift(self.filter_set_x[j, l]))
-                # self.filter_set_k[j, l, 0, 0] = 0  # borrowed from yst code, don't know if it actually does anything
+                self.filters_x[j, l] = self.morlet_wavelet_jl(j, l)
+                self.filters_k[j, l] = torch.fft.fft2(torch.fft.fftshift(self.filters_x[j, l]))
+                # self.filters_k[j, l, 0, 0] = 0  # borrowed from yst code, don't know if it actually does anything
+        self.apply_filter_cut(self.filters_k)
 
     def gaussian(self, x):
         return torch.exp(-x.transpose(-2, -1) @ x / 2)
@@ -68,6 +74,36 @@ class WaveletsMorlet(object):
         return grid_xvec.type(torch.complex64)
 
 
+    def apply_filter_cut(self, filters):
+        self.filters_cut = []
+        for j in range(self.J):
+            self.filters_cut.append(self.cut_high_k_off(filters[j], j))
+
+
+
+    def cut_high_k_off(self, data_k, j=1):
+        if j <= 1:
+            return data_k
+
+        M = data_k.shape[-2]
+        N = data_k.shape[-1]
+        dx = int(max(16, min(np.ceil(M / 2 ** j), M // 2)))
+        dy = int(max(16, min(np.ceil(N / 2 ** j), N // 2)))
+
+
+        result = torch.cat(
+            (torch.cat(
+                (data_k[..., :dx, :dy], data_k[..., -dx:, :dy]
+                 ), -2),
+             torch.cat(
+                 (data_k[..., :dx, -dy:], data_k[..., -dx:, -dy:]
+                  ), -2)
+            ), -1)
+
+
+        return result
+
+
 class CustomFilters:
     """
     Custom filters - note that these are not by default symmetric around pi so we go through the whole 2pi range
@@ -77,8 +113,8 @@ class CustomFilters:
         self.J = J + 1
         self.L = L
         self.x_grid = self._get_x_grid()
-        self.filter_set_x = torch.zeros((self.J, L, self.size, self.size), dtype=torch.complex64)
-        self.filter_set_k = torch.zeros((self.J, L, self.size, self.size), dtype=torch.complex64)
+        self.filters_x = torch.zeros((self.J, L, self.size, self.size), dtype=torch.complex64)
+        self.filters_k = torch.zeros((self.J, L, self.size, self.size), dtype=torch.complex64)
         self.mother_wavelet = mother_wavelet
 
     def child_wavelet(self, j, l):
@@ -89,12 +125,12 @@ class CustomFilters:
         x = self._inv_rotation_operator(x.swapaxes(2, 3), theta).swapaxes(2, 3)  # axis swapping so matrix mult behaves
         return torch.squeeze(self.mother_wavelet(x / 2 ** j) / 2 ** 2 * j)
 
-    def make_filter_set(self):
+    def make_filters(self):
         for j in range(self.J):
             for l in range(self.L):
-                self.filter_set_x[j, l] = self.child_wavelet(j, l)
-                self.filter_set_k[j, l] = torch.fft.fft2(torch.fft.fftshift(self.filter_set_x[j, l]))
-                # self.filter_set_k[j, l, 0, 0] = 0  # borrowed from yst code, don't know if it actually does anything
+                self.filters_x[j, l] = self.child_wavelet(j, l)
+                self.filters_k[j, l] = torch.fft.fft2(torch.fft.fftshift(self.filters_x[j, l]))
+                # self.filters_k[j, l, 0, 0] = 0  # borrowed from yst code, don't know if it actually does anything
 
     def _inv_rotation_operator(self, x, theta):
         """Rotates a vector k by theta"""
@@ -107,3 +143,5 @@ class CustomFilters:
         grid_xvec = torch.stack([grid_x, grid_y])
         grid_xvec = grid_xvec.swapaxes(0, 1).swapaxes(1, 2)[:, :, None, :]
         return grid_xvec.type(torch.float32)
+
+
