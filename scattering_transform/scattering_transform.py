@@ -63,7 +63,7 @@ class ScatteringTransformFast:
         self.size_x, self.size_y = filters.size, filters.size
         self.filters = filters
 
-    def run(self, input_fields):
+    def run(self, input_fields, output='standard'):
         """Perform the scattering transform"""
         batch_size = input_fields.shape[0]
 
@@ -75,7 +75,6 @@ class ScatteringTransformFast:
         self.S2 = torch.full((batch_size, self.J, self.L, self.J, self.L), torch.nan)
 
         for j1 in range(self.J):
-            print(self.cut_high_k_off(I0_k, j=j1))
             I0_k_cut, cut_factor = self.cut_high_k_off(I0_k, j=j1)
             product = I0_k_cut[:, None, :, :] * self.filters.filters_cut[j1]
             I1_j1 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
@@ -102,12 +101,23 @@ class ScatteringTransformFast:
         self.s1 = torch.mean(self.S1, dim=-1)
         self.s2 = torch.mean(self.S2, dim=(-3, -1))
 
-        return self.s0, self.s1, self.s2
+        if output == 'standard':
+            return self.s0, self.s1, self.s2
 
+        s1_norm = self.s1 / self.s0
+        s2_norm = self.s2 / s1_norm[None, :]
+
+        if output == 'normalised':
+            return self.s0, s1_norm, s2_norm
+
+        if output == 'condensed':
+            return torch.cat([self.s0, s1_norm, s2_norm.flatten()])
+
+        raise ValueError("output must be one of ('standard', 'normalised', 'condensed')")
 
     def cut_high_k_off(self, data_k, j=1):
         if j <= 1:
-            return data_k
+            return data_k, 1
 
         M = data_k.shape[-2]
         N = data_k.shape[-1]
@@ -127,6 +137,5 @@ class ScatteringTransformFast:
 
         post_cut_size = result.numel()
         cut_factor = post_cut_size / pre_cut_size
-        print("whatttt")
-        return
+        return result, cut_factor
 
