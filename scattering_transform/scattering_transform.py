@@ -115,15 +115,14 @@ class ScatteringTransformFast:
         print(self.s2.shape)
 
         if condensed:
-            self.s2 = self.s2.flatten(-2, -1)
-            # self.s2 = self.s2[~torch.isnan(self.s2)]
+            self.s2 = self.s2[~torch.isnan(self.s2)].reshape((self.s2.shape[0], -1))
 
             print('condensed')
             print(self.s0.shape)
             print(self.s1.shape)
             print(self.s2.shape)
 
-            return torch.cat([self.s0, self.s1, self.s2.flatten()], dim=-1)
+            return torch.cat([self.s0[:, None], self.s1, self.s2.flatten()], dim=-1)
 
         return self.s0, self.s1, self.s2
 
