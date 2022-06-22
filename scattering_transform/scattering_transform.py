@@ -101,19 +101,24 @@ class ScatteringTransformFast:
         self.s1 = torch.mean(self.S1, dim=-1)
         self.s2 = torch.mean(self.S2, dim=(-3, -1))
 
+        print(self.s0.shape)
+        print(self.s1.shape)
+        print(self.s2.shape)
+
         if normalised:
             self.s1 = self.s1 / self.s0[:, None]
             self.s2 = self.s2 / self.s1[:, None]
 
+        print('normed')
+        print(self.s0.shape)
+        print(self.s1.shape)
+        print(self.s2.shape)
 
         if condensed:
             self.s2 = self.s2.flatten(-2, -1)
             self.s2 = self.s2[~torch.isnan(self.s2)]
 
-            print(self.s0)
-            print(self.s1)
-            print(self.s2)
-
+            print('condensed')
             print(self.s0.shape)
             print(self.s1.shape)
             print(self.s2.shape)
