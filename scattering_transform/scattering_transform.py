@@ -116,7 +116,7 @@ class ScatteringTransformFast:
 
         if condensed:
             self.s2 = self.s2.flatten(-2, -1)
-            self.s2 = self.s2[~torch.isnan(self.s2)]
+            # self.s2 = self.s2[~torch.isnan(self.s2)]
 
             print('condensed')
             print(self.s0.shape)
