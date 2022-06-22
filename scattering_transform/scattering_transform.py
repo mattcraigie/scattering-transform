@@ -122,7 +122,7 @@ class ScatteringTransformFast:
             print(self.s1.shape)
             print(self.s2.shape)
 
-            return torch.cat([self.s0[:, None], self.s1, self.s2.flatten()], dim=-1)
+            return torch.cat([self.s0[:, None], self.s1, self.s2], dim=-1)
 
         return self.s0, self.s1, self.s2
 
