@@ -84,7 +84,7 @@ class WaveletsMorlet(object):
 
     def cut_high_k_off(self, data_k, j=1):
         if j <= 1:
-            return data_k
+            return data_k.to(self.device)
 
         M = data_k.shape[-2]
         N = data_k.shape[-1]
