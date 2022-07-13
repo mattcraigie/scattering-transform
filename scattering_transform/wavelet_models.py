@@ -7,13 +7,14 @@ class WaveletsMorlet(object):
     Standard Morlet Wavelet. Go to, because it has all the properties of a Gabor filter and satisfies the admissibility
     criteria.
     """
-    def __init__(self, image_size, J, L, make_filters=True):
+    def __init__(self, image_size, J, L, make_filters=True, device='cpu'):
         self.size = image_size
         self.J = J
         self.L = L
         self.x_grid = self._get_x_grid()
         self.filters_x = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
         self.filters_k = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
+        self.device = device
 
         if make_filters:
             self.make_filters()
