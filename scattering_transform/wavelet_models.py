@@ -102,7 +102,7 @@ class WaveletsMorlet(object):
             ), -1)
 
 
-        return result
+        return result.to(self.device)
 
 
 class CustomFilters:
