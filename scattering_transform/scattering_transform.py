@@ -107,9 +107,6 @@ class ScatteringTransformFast:
 
         if condensed:
             self.s2 = self.s2[~torch.isnan(self.s2)].reshape((self.s2.shape[0], -1))
-            print(self.s0.device)
-            print(self.s1.device)
-            print(self.s2.device)
             return torch.cat([self.s0[:, None], self.s1, self.s2], dim=-1)
 
         return self.s0, self.s1, self.s2
