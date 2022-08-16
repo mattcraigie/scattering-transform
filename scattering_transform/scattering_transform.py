@@ -70,7 +70,7 @@ class ScatteringTransformFast:
         self.I0 = input_fields
         I0_k = torch.fft.fft2(self.I0, dim=(-2, -1))
 
-        self.S0 = torch.mean(torch.abs(self.I0), dim=(-2, -1))
+        self.S0 = torch.mean(self.I0, dim=(-2, -1))
         self.S1 = torch.zeros(size=(batch_size, self.J, self.L), device=self.filters.device)
         self.S2 = torch.full((batch_size, self.J, self.L, self.J, self.L), torch.nan, device=self.filters.device)
 
