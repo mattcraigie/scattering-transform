@@ -106,7 +106,7 @@ class ScatteringTransformFast:
             self.s2 = self.s2 / self.s1[:, None]
 
         if condensed:
-            self.s2 = self.s2[torch.ones(self.s2.shape, dtype=torch.bool).triu()].reshape((self.s2.shape[0], -1))
+            self.s2 = self.s2[torch.ones(self.s2.shape, dtype=torch.bool).triu(diagonal=1)].reshape((self.s2.shape[0], -1))
             return torch.cat([self.s0[:, None], self.s1, self.s2], dim=-1)
 
         return self.s0, self.s1, self.s2
