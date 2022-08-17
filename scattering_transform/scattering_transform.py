@@ -72,7 +72,7 @@ class ScatteringTransformFast:
 
         self.S0 = torch.mean(self.I0, dim=(-2, -1))
         self.S1 = torch.zeros(size=(batch_size, self.J, self.L), device=self.filters.device)
-        self.S2 = torch.full((batch_size, self.J, self.L, self.J, self.L), torch.nan, device=self.filters.device)
+        self.S2 = torch.zeros((batch_size, self.J, self.L, self.J, self.L), device=self.filters.device)
 
         for j1 in range(self.J):
             I0_k_cut, cut_factor = self.cut_high_k_off(I0_k, j=j1)
@@ -106,7 +106,7 @@ class ScatteringTransformFast:
             self.s2 = self.s2 / self.s1[:, None]
 
         if condensed:
-            self.s2 = self.s2[~torch.isnan(self.s2)].reshape((self.s2.shape[0], -1))
+            self.s2 = self.s2[torch.ones(self.s2.shape).triu()].reshape((self.s2.shape[0], -1))
             return torch.cat([self.s0[:, None], self.s1, self.s2], dim=-1)
 
         return self.s0, self.s1, self.s2
