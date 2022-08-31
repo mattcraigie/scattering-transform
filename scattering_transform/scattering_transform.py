@@ -63,6 +63,7 @@ class ScatteringTransformFast(torch.nn.Module):
         self.L = filters.L
         self.size_x, self.size_y = filters.size, filters.size
         self.filters = filters
+        self.num_coeffs = 1 + self.J + self.J * (self.J - 1) / 2
 
     def run(self, input_fields, normalised=False, condensed=False):
         """Perform the scattering transform"""
