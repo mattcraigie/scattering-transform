@@ -15,6 +15,7 @@ class WaveletsMorlet(object):
         self.filters_x = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
         self.filters_k = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
         self.device = device
+        self.cut_sizes = [max(int(self.size * 2**-j), 32) for j in range(J)]
 
         if make_filters:
             self.make_filters()
@@ -81,28 +82,19 @@ class WaveletsMorlet(object):
             self.filters_cut.append(self.cut_high_k_off(filters[j], j))
 
 
-
     def cut_high_k_off(self, data_k, j=1):
-        if j <= 1:
-            return data_k.to(self.device)
-
-        M = data_k.shape[-2]
-        N = data_k.shape[-1]
-        dx = int(max(16, min(np.ceil(M / 2 ** j), M // 2)))
-        dy = int(max(16, min(np.ceil(N / 2 ** j), N // 2)))
-
+        dx = self.cut_sizes[j]
 
         result = torch.cat(
             (torch.cat(
-                (data_k[..., :dx, :dy], data_k[..., -dx:, :dy]
+                (data_k[..., :dx, :dx], data_k[..., -dx:, :dx]
                  ), -2),
              torch.cat(
-                 (data_k[..., :dx, -dy:], data_k[..., -dx:, -dy:]
+                 (data_k[..., :dx, -dx:], data_k[..., -dx:, -dx:]
                   ), -2)
             ), -1)
 
-
-        return result.to(self.device)
+        return result
 
 
 class CustomFilters:
