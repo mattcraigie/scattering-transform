@@ -55,9 +55,10 @@ class ScatteringTransformFull:
         return self.I1_rot_avg, self.I2_rot_avg
 
 
-class ScatteringTransformFast:
+class ScatteringTransformFast(torch.nn.Module):
 
-    def __init__(self, filters: WaveletsMorlet):
+    def __init__(self, filters):
+        super(ScatteringTransformFast, self).__init__()
         self.J = filters.J
         self.L = filters.L
         self.size_x, self.size_y = filters.size, filters.size
