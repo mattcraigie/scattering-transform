@@ -114,7 +114,7 @@ class ScatteringTransformFast(torch.nn.Module):
         return self.s0, self.s1, self.s2
 
     def cut_high_k_off(self, data_k, j=1):
-        dx = self.filters.cut_sizes[j]
+        dx = self.filters.cut_sizes[j] // 2
         pre_cut_size = data_k.numel()
 
         result = torch.cat(

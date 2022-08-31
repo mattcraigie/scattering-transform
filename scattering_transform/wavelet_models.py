@@ -83,7 +83,7 @@ class WaveletsMorlet(object):
 
 
     def cut_high_k_off(self, data_k, j=1):
-        dx = self.cut_sizes[j]
+        dx = self.cut_sizes[j] // 2
 
         result = torch.cat(
             (torch.cat(
