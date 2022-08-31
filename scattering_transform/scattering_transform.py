@@ -94,6 +94,11 @@ class ScatteringTransformFast(torch.nn.Module):
                     #     factor = j2
 
                     I1_j1_k_cut, cut_factor = self.cut_high_k_off(I1_j1_k, j=j2)
+                    print(I1_j1_k_cut.shape)
+                    print(self.filters.filters_cut[j2].shape)
+                    print(I1_j1_k_cut.shape[:, :, None, :, :].shape)
+                    print(self.filters.filters_cut[j2].shape[None, None, :, :, :].shape)
+
                     product = I1_j1_k_cut[:, :, None, :, :] * self.filters.filters_cut[j2][None, None, :, :, :]
                     I2_j1j2 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
 
