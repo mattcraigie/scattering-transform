@@ -88,12 +88,12 @@ class ScatteringTransformFast(torch.nn.Module):
             for j2 in range(self.J):
                 if j2 > j1:
 
-                    if j1 >= 1:
-                        factor = j2 - j1 + 1
-                    else:
-                        factor = j2
+                    # if j1 >= 1:
+                    #     factor = j2 - j1 + 1
+                    # else:
+                    #     factor = j2
 
-                    I1_j1_k_cut, cut_factor = self.cut_high_k_off(I1_j1_k, j=factor)
+                    I1_j1_k_cut, cut_factor = self.cut_high_k_off(I1_j1_k, j=j2)
                     product = I1_j1_k_cut[:, :, None, :, :] * self.filters.filters_cut[j2][None, None, :, :, :]
                     I2_j1j2 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
 
@@ -115,6 +115,7 @@ class ScatteringTransformFast(torch.nn.Module):
 
     def cut_high_k_off(self, data_k, j=1):
         dx = self.filters.cut_sizes[j] // 2
+        print(dx)
         pre_cut_size = data_k.numel()
 
         result = torch.cat(
