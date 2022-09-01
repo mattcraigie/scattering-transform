@@ -70,7 +70,7 @@ class WaveletsMorlet(torch.nn.Module):
                             dtype=torch.complex64)
 
     def _get_x_grid(self):
-        pixels = torch.arange(-int(self.size / 2), int(self.size / 2), device=self.device)
+        pixels = torch.arange(-int(self.size / 2), int(self.size / 2))
         grid_x, grid_y = torch.meshgrid(pixels, pixels)
         grid_xvec = torch.stack([grid_x, grid_y])
         grid_xvec = grid_xvec.swapaxes(0, 1).swapaxes(1, 2)[..., None]
@@ -80,7 +80,7 @@ class WaveletsMorlet(torch.nn.Module):
     def apply_filter_cut(self, filters):
         self.filters_cut = []
         for j in range(self.J):
-            self.filters_cut.append(self.cut_high_k_off(filters[j], j))
+            self.filters_cut.append(self.cut_high_k_off(filters[j], j).to(self.device))
 
 
     def cut_high_k_off(self, data_k, j=1):
