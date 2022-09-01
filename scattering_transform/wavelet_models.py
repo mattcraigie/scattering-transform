@@ -80,7 +80,7 @@ class WaveletsMorlet(torch.nn.Module):
     def apply_filter_cut(self, filters):
         self.filters_cut = []
         for j in range(self.J):
-            self.filters_cut.append(self.cut_high_k_off(filters[j], j))
+            self.filters_cut.append(self.cut_high_k_off(filters[j], j).to(self.device))
 
 
     def cut_high_k_off(self, data_k, j=1):
