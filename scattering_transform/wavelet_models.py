@@ -13,8 +13,8 @@ class WaveletsMorlet(torch.nn.Module):
         self.J = J
         self.L = L
         self.x_grid = self._get_x_grid()
-        self.filters_x = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
-        self.filters_k = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64)
+        self.filters_x = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64, device=device)
+        self.filters_k = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64, device=device)
         self.device = device
         self.cut_sizes = [max(int(self.size * 2**-j), 32) for j in range(J)]
 
@@ -70,7 +70,7 @@ class WaveletsMorlet(torch.nn.Module):
                             dtype=torch.complex64)
 
     def _get_x_grid(self):
-        pixels = torch.arange(-int(self.size / 2), int(self.size / 2))
+        pixels = torch.arange(-int(self.size / 2), int(self.size / 2), device=self.device)
         grid_x, grid_y = torch.meshgrid(pixels, pixels)
         grid_xvec = torch.stack([grid_x, grid_y])
         grid_xvec = grid_xvec.swapaxes(0, 1).swapaxes(1, 2)[..., None]
@@ -80,7 +80,7 @@ class WaveletsMorlet(torch.nn.Module):
     def apply_filter_cut(self, filters):
         self.filters_cut = []
         for j in range(self.J):
-            self.filters_cut.append(self.cut_high_k_off(filters[j], j).to(self.device))
+            self.filters_cut.append(self.cut_high_k_off(filters[j], j))
 
 
     def cut_high_k_off(self, data_k, j=1):
