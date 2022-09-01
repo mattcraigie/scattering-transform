@@ -12,10 +12,10 @@ class WaveletsMorlet(torch.nn.Module):
         self.size = image_size
         self.J = J
         self.L = L
+        self.device = device
         self.x_grid = self._get_x_grid()
         self.filters_x = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64, device=device)
         self.filters_k = torch.zeros((self.J, self.L, self.size, self.size), dtype=torch.complex64, device=device)
-        self.device = device
         self.cut_sizes = [max(int(self.size * 2**-j), 32) for j in range(J)]
 
         if make_filters:
