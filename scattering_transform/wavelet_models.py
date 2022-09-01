@@ -2,12 +2,13 @@ import torch
 import numpy as np
 
 
-class WaveletsMorlet(object):
+class WaveletsMorlet(torch.nn.Module):
     """
     Standard Morlet Wavelet. Go to, because it has all the properties of a Gabor filter and satisfies the admissibility
     criteria.
     """
     def __init__(self, image_size, J, L, make_filters=True, device='cpu'):
+        super(WaveletsMorlet, self).__init__()
         self.size = image_size
         self.J = J
         self.L = L
