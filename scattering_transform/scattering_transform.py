@@ -71,7 +71,6 @@ class ScatteringTransformFast(torch.nn.Module):
         l_b = torch.arange(self.L)[None, :]
         diffs = torch.abs(l_b - l_a)
         self.l_deltas = torch.min(diffs, self.L - diffs)
-        print(self.l_deltas)
 
 
     def run(self, input_fields, normalised=False, condensed=False, reduction='full'):
@@ -102,12 +101,17 @@ class ScatteringTransformFast(torch.nn.Module):
                     self.S2[:, j1, :, j2, :] = torch.mean(I2_j1j2, dim=(-2, -1)) * cut_factor
 
 
+        if reduction == 'angular difference':
+            self.s2 = torch.roll(self.s2, shifts=torch.arange(torch.max(self.l_deltas), dtype=torch.int), dims=(-1,))
+            print(self.s2[0])
+            self.s2 = torch.mean(self.S2, dim=-1)
+            print(self.s2[0])
 
+        else:
 
-
-        self.s0 = self.S0
-        self.s1 = torch.mean(self.S1, dim=-1)
-        self.s2 = torch.mean(self.S2, dim=(-3, -1))
+            self.s0 = self.S0
+            self.s1 = torch.mean(self.S1, dim=-1)
+            self.s2 = torch.mean(self.S2, dim=(-3, -1))
 
         if normalised:
             self.s1 = self.s1 / self.s0[:, None]
