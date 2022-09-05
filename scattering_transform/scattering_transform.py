@@ -103,6 +103,7 @@ class ScatteringTransformFast(torch.nn.Module):
 
         if reduction == 'angular difference':
             self.S2 = self.S2.permute((0, 1, 3, 2, 4))
+            print(self.S2.shape)
             for i in range(torch.max(self.l_deltas)):
                 print(self.S2[0, 0, 0])
                 print("")
