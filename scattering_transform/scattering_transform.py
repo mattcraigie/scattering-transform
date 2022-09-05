@@ -102,9 +102,9 @@ class ScatteringTransformFast(torch.nn.Module):
 
 
         if reduction == 'angular difference':
-            self.s2 = torch.roll(self.s2, shifts=torch.arange(torch.max(self.l_deltas), dtype=torch.int), dims=(-1,))
+            self.s2 = torch.roll(self.S2, shifts=torch.arange(torch.max(self.l_deltas), dtype=torch.int), dims=(-1,))
             print(self.s2[0])
-            self.s2 = torch.mean(self.S2, dim=-1)
+            self.s2 = torch.mean(self.s2, dim=-1)
             print(self.s2[0])
 
         else:
