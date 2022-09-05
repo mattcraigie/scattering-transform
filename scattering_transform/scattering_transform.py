@@ -110,11 +110,11 @@ class ScatteringTransformFast(torch.nn.Module):
 
             self.s2 = torch.zeros((batch_size, self.J, self.J, self.num_l_deltas), device=self.filters.device)
             self.S2 = self.S2.permute((0, 1, 3, 2, 4))
-
+            print(self.S2[0, 0, 0])
             for i in range(self.num_l_deltas):
-                print(self.S2[0, 0, 0])
-                self.s2[..., i] = torch.mean(self.S2[self.l_deltas_masks[i].expand(batch_size, self.J, self.J, -1, -1)])
-                print(self.s2[0, 0, 0])
+                print(self.S2[self.l_deltas_masks[i].expand(batch_size, self.J, self.J, -1, -1)].shape)
+                self.s2[..., i] = torch.mean(self.S2[self.l_deltas_masks[i].expand(batch_size, self.J, self.J, -1, -1)], dim=-1)
+            print(self.s2[0, 0, 0])
 
         else:
 
