@@ -69,7 +69,8 @@ class ScatteringTransformFast(torch.nn.Module):
         # for angle difference reduction
         l_a = torch.arange(self.L)[:, None]
         l_b = torch.arange(self.L)[None, :]
-        self.l_deltas = torch.abs(l_b - l_a)
+        diffs = torch.abs(l_b - l_a)
+        self.l_deltas = torch.min(diffs, self.L - diffs)
         print(self.l_deltas)
 
 
