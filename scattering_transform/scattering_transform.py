@@ -113,6 +113,10 @@ class ScatteringTransformFast(torch.nn.Module):
             self.S2 = self.S2.permute((0, 1, 3, 2, 4))
             for i in range(self.num_l_deltas):
                 self.s2[..., i] = torch.mean(self.S2[:, :, :, self.l_deltas_masks[i]], dim=-1)
+
+            self.s2 = self.s2[:, torch.ones((self.J, self.J), dtype=torch.bool).triu(diagonal=1)]
+            print(self.s2.shape)
+            return torch.cat([self.s0[:, None], self.s1, self.s2], dim=-1)
         else:
 
             self.s0 = self.S0
