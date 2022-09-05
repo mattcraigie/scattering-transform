@@ -65,7 +65,15 @@ class ScatteringTransformFast(torch.nn.Module):
         self.filters = filters
         self.num_coeffs = int(1 + self.J + self.J * (self.J - 1) / 2)
 
-    def run(self, input_fields, normalised=False, condensed=False):
+
+        # for angle difference reduction
+        l_a = torch.arange(self.L)[:, None]
+        l_b = torch.arange(self.L)[None, :]
+        self.l_deltas = torch.min(torch.abs(l_b - l_a), torch.abs(l_b - (l_a + self.L)))
+        print(self.l_deltas)
+
+
+    def run(self, input_fields, normalised=False, condensed=False, reduction='full'):
         """Perform the scattering transform"""
         batch_size = input_fields.shape[0]
 
@@ -91,6 +99,10 @@ class ScatteringTransformFast(torch.nn.Module):
                     product = I1_j1_k_cut[:, :, None, :, :] * self.filters.filters_cut[j2][None, None, :, :, :]
                     I2_j1j2 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
                     self.S2[:, j1, :, j2, :] = torch.mean(I2_j1j2, dim=(-2, -1)) * cut_factor
+
+
+
+
 
         self.s0 = self.S0
         self.s1 = torch.mean(self.S1, dim=-1)
