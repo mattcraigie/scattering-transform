@@ -71,7 +71,7 @@ class ScatteringTransformFast(torch.nn.Module):
         l_b = torch.arange(self.L)[None, :]
         diffs = torch.abs(l_b - l_a)
         self.l_deltas = torch.min(diffs, self.L - diffs)
-        self.num_l_deltas = torch.max(self.l_deltas).type(torch.int)
+        self.num_l_deltas = torch.max(self.l_deltas).type(torch.int) + 1
         self.l_deltas_masks = torch.zeros(self.num_l_deltas, self.L, self.L, dtype=torch.bool)
 
         for i in range(self.num_l_deltas):
