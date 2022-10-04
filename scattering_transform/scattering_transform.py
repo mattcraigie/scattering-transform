@@ -1,153 +1,171 @@
 import numpy as np
 import torch
-from scattering_transform.wavelet_models import WaveletsMorlet
+from torch.fft import fft2, ifft2
+from scattering_transform.wavelet_models import Wavelet
 
 
-class ScatteringTransformFull:
+def scattering_operation(input_a: torch.Tensor, input_b: torch.Tensor) -> torch.Tensor:
+    """
+    Convolves and takes the absolute value of two input fields
+    :param input_a: the first field in Fourier space (usually a physical field)
+    :param input_b: the second field in Fourier space (usually a wavelet filter)
+    :return: the otuput scattering field
+    """
+    return ifft2(input_a * input_b).abs()
 
 
-    def __init__(self, filters: WaveletsMorlet):
-        self.J = filters.J
-        self.L = filters.L
-        self.size_x, self.size_y = filters.size, filters.size
+def clip_fourier_field(field: torch.Tensor, final_size: int):
+    """
+    Performs a high frequency clip on a 2D field in Fourier space for a filter scale J.
+    :param field: The input field.
+    :param filter_scale: The filter scale
+    :return:
+    """
+    cl = final_size // 2
+    result = torch.cat((torch.cat((field[..., :cl, :cl], field[..., -cl:, :cl]), -2),
+                        torch.cat((field[..., :cl, -cl:], field[..., -cl:, -cl:]), -2)
+                        ), -1)
+    return result
+
+
+def scale_to_clip_size(scale: int, start_size: int):
+    """
+    Sets the clip size (and limit to that) that is used to speed up the scattering transform. This is a tradeoff
+    between reducing runtime and reducing accuracy.
+    :param scale: The wavelet scale factor (often denoted j)
+    :param start_size: The size of the initial field
+    :return:
+    """
+    return max(int(start_size * 2 ** -scale), 32)
+
+
+class ScatteringTransform2d(object):
+
+    def __init__(self, filters: Wavelet):
+        super(ScatteringTransform2d, self).__init__()
         self.filters = filters
+        self.filters_clip = [clip_fourier_field(filters.filter_tensor[j], scale_to_clip_size(j, self.filters.size))
+                             for j in range(self.filters.num_scales)]
+
+    def run(self, fields: torch.Tensor, output_type='rot_avg', normalise_s1=False, normalise_s2=False):
+        """
+        Run the scattering transform for the input fields. It already has wavelets setup.
+        :param fields: The fields to run the scattering transform on with Size(batch_size, size, size)
+        :return: scattering coefficients
+        """
+        batch_size = fields.shape[0]
+        coeffs_0 = torch.mean(fields, dim=(-2, -1))
+        coeffs_1 = torch.zeros(size=(batch_size, self.filters.num_scales, self.filters.num_angles))
+        coeffs_2 = torch.zeros((batch_size, self.filters.num_scales, self.filters.num_scales,
+                                self.filters.num_angles, self.filters.num_angles))
+
+        fields_k = torch.fft.fft2(fields)
+
+        for scale_1 in range(self.filters.num_scales):
+            fields_k_clip = clip_fourier_field(fields_k, scale_to_clip_size(scale_1, self.filters.size))
+            scatt_fields_1 = scattering_operation(fields_k_clip.unsqueeze(1), self.filters_clip[scale_1].unsqueeze(0))
+            coeffs_1[:, scale_1] = torch.mean(scatt_fields_1, dim=(-2, -1))  # * cut_factor
+            scatt_fields_1_k = torch.fft.fft2(scatt_fields_1)
+
+            for scale_2 in range(self.filters.num_scales):
+                if scale_2 > scale_1:
+                    scatt_fields_1_k_clip = clip_fourier_field(scatt_fields_1_k,
+                                                               scale_to_clip_size(scale_2, self.filters.size))
+                    scatt_fields_2 = scattering_operation(scatt_fields_1_k_clip.unsqueeze(2),
+                                                          self.filters_clip[scale_2][None, None, ...])
+                    coeffs_2[:, scale_1, :, scale_2, :] = torch.mean(scatt_fields_2, dim=(-2, -1))  # * cut_factor
+
+        return self.reduce_coeffs(coeffs_0, coeffs_1, coeffs_2, output_type, normalise_s1, normalise_s2)
+
+    def reduce_coeffs(self, s0, s1, s2, output_type='rot_avg', normalise_s1=False, normalise_s2=False):
+
+        assert output_type in ['all', 'rot_avg', 'angle_avg'], \
+            "Wrong output type: must be one of ['all', 'rot_avg', 'angle_avg']"
+
+        # Normalisation
+        if normalise_s2:
+            s2 /= s1[:, :, :, None, None]
+
+        if normalise_s1:
+            s1 /= s0[:, None, None]
+
+        # Reduction by averaging
+        s0 = s0.unsqueeze(1)
+        scale_idx = torch.triu_indices(self.filters.num_scales, self.filters.num_scales, offset=1)
+        s2 = s2[:, scale_idx[0], :, scale_idx[1]].swapaxes(0, 1)
+
+        if output_type == 'all':
+            s1 = s1.flatten(1, 2)
+            s2 = s2.flatten(1, 3)
+
+        elif output_type == 'rot_avg':
+            s1 = s1.mean(-1)
+            s2 = s2.mean(dim=(-2, -1))
+
+        elif output_type == 'angle_avg':
+            raise NotImplementedError  # todo: angle averaging neatly
+
+        # todo: correctly apply before/after cut scale factor
+
+        return torch.cat((s0, s1, s2), dim=1)
 
 
+class CrossScatteringTransform2d(ScatteringTransform2d):
+    def __init__(self, filters: Wavelet):
+        super(CrossScatteringTransform2d, self).__init__(filters)
 
-    def run(self, input_field):
-        """Perform the scattering transform. Computes multiplication and ffts on single tensors."""
-        self.I0 = input_field
-        I0_k = torch.fft.fft2(self.I0)
+    def run_standard(self, fields: torch.Tensor, output_type='rot_avg'):
+        return self.run(fields, output_type)
 
-        batch_size = input_field.shape[0]
+    def run_cross(self, fields_a: torch.Tensor, fields_b: torch.Tensor, output_type='rot_avg', normalise_s1=False,
+                  normalise_s2=False):
+        """
+        Run the cross scattering transform for the input fields. It already has wavelets setup.
 
-
-        self.I1 = torch.zeros((batch_size, self.J, self.L, self.size_x, self.size_y), dtype=torch.complex64)
-        self.I2 = torch.zeros((batch_size, self.J, self.L, self.J, self.L, self.size_x, self.size_y), dtype=torch.complex64)
-
-        # cheeky dimension tricks to avoid loops and go 10% faster -- does not filter out j2 > j1 though
-        product1 = I0_k[:, None, None, ...] * self.filters.filters_k
-        self.I1 = torch.fft.ifftn(product1, dim=(-1, -2)).abs()
-        I1_k = torch.fft.fftn(self.I1, dim=(-1, -2))
-
-
-        product2 = I1_k[..., None, None, :, :] * self.filters.filters_k
-        self.I2 = torch.fft.ifftn(product2, dim=(-1, -2)).abs()
-
-        return self.calculate_scattering_coefficients()
+        Couple of different ways we can implement the second order.
+            - We could reiterate the scattering operation on the cross fields
+            - We could cross the 2nd order fields for each
+        I think the first option holds more info but I'll have to test the second.
 
 
-    def calculate_scattering_coefficients(self):
-        self.S0 = torch.mean(self.I0, dim=(-1, -2))
-        self.S1 = torch.mean(torch.abs(self.I1), dim=(-1, -2))
-        self.S2 = torch.mean(torch.abs(self.I2), dim=(-1, -2))
+        :param fields_a: The first set of fields to run the scattering transform on with Size(batch_size, size, size)
+        :param fields_b: The second set of fields to run the scattering transform on with Size(batch_size, size, size)
+        :return: scattering coefficients
+        """
+        assert fields_a.shape == fields_b.shape, \
+            "Fields must match shape but have shapes {} and {}".format(fields_a.shape, fields_b.shape)
 
-        self.s0 = self.S0
-        self.s1 = torch.mean(self.S1, dim=-1)
-        self.s2 = torch.mean(self.S2, dim=(-1, -3))
+        batch_size = fields_a.shape[0]
+        coeffs_0 = torch.mean(torch.sqrt(fields_a * fields_b), dim=(-2, -1))
+        coeffs_1 = torch.zeros(size=(batch_size, self.filters.num_scales, self.filters.num_angles))
+        coeffs_2 = torch.zeros((batch_size, self.filters.num_scales, self.filters.num_scales,
+                                self.filters.num_angles, self.filters.num_angles))
 
-        return self.s0, self.s1, self.s2
+        fields_a_k = torch.fft.fft2(fields_a)
+        fields_b_k = torch.fft.fft2(fields_a)
 
-    def rotationally_average_fields(self):
-        self.I1_rot_avg = torch.mean(self.I1, dim=-1)
-        self.I2_rot_avg = torch.mean(self.I2, dim=(-3, -5))
+        for scale_1 in range(self.filters.num_scales):
+            fields_a_k_clip = clip_fourier_field(fields_a_k, scale_1)
+            fields_b_k_clip = clip_fourier_field(fields_b_k, scale_1)
+            cross_scatt_fields_1 = self.cross_scattering(fields_a_k_clip.unsqueeze(1),
+                                                         fields_b_k_clip.unsqueeze(1),
+                                                         self.filters_clip[scale_1].unsqueeze(0))
+            coeffs_1[:, scale_1] = torch.mean(cross_scatt_fields_1, dim=(-2, -1))  # * cut_factor
 
-        return self.I1_rot_avg, self.I2_rot_avg
+            scatt_fields_1_k = torch.fft.fft2(cross_scatt_fields_1)
 
-
-class ScatteringTransformFast(torch.nn.Module):
-
-    def __init__(self, filters):
-        super(ScatteringTransformFast, self).__init__()
-        self.J = filters.J
-        self.L = filters.L
-        self.size_x, self.size_y = filters.size, filters.size
-        self.filters = filters
-        self.num_coeffs = int(1 + self.J + self.J * (self.J - 1) / 2)
-
-
-        # for angle difference reduction
-        l_a = torch.arange(self.L)[:, None]
-        l_b = torch.arange(self.L)[None, :]
-        diffs = torch.abs(l_b - l_a)
-        self.l_deltas = torch.min(diffs, self.L - diffs)
-        self.num_l_deltas = torch.max(self.l_deltas).type(torch.int) + 1
-        self.l_deltas_masks = torch.zeros(self.num_l_deltas, self.L, self.L, dtype=torch.bool)
-
-        for i in range(self.num_l_deltas):
-            self.l_deltas_masks[i] = self.l_deltas == i
+            for scale_2 in range(self.filters.num_scales):
+                if scale_2 > scale_1:
+                    scatt_fields_1_k_clip = clip_fourier_field(scatt_fields_1_k, scale_2)
+                    scatt_fields_2 = scattering_operation(scatt_fields_1_k_clip.unsqueeze(2),
+                                                          self.filters_clip[scale_2][None, None, ...])
+                    coeffs_2[:, scale_1, :, scale_2, :] = torch.mean(scatt_fields_2, dim=(-2, -1))  # * cut_factor
 
 
-    def run(self, input_fields, normalised=False, condensed=False, reduction='full'):
-        """Perform the scattering transform"""
-        batch_size = input_fields.shape[0]
+        return self.reduce_coeffs(coeffs_0, coeffs_1, coeffs_2, output_type, normalise_s1, normalise_s2)
 
-        self.I0 = input_fields
-        I0_k = torch.fft.fft2(self.I0, dim=(-2, -1))
-
-        self.S0 = torch.mean(self.I0, dim=(-2, -1))
-        self.S1 = torch.zeros(size=(batch_size, self.J, self.L), device=self.filters.device)
-        self.S2 = torch.zeros((batch_size, self.J, self.L, self.J, self.L), device=self.filters.device)
-
-        for j1 in range(self.J):
-            I0_k_cut, cut_factor = self.cut_high_k_off(I0_k, j=j1)
-            product = I0_k_cut[:, None, :, :] * self.filters.filters_cut[j1]
-            I1_j1 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
-            self.S1[:, j1] = torch.mean(I1_j1, dim=(-2, -1)) * cut_factor
-
-            I1_j1_k = torch.fft.fftn(I1_j1, dim=(-2, -1))
+    def cross_scattering(self, a, b, psi):
+        return torch.sqrt(ifft2(a * psi).abs() * ifft2(b * psi).abs())
 
 
-            for j2 in range(self.J):
-                if j2 > j1:
-                    I1_j1_k_cut, cut_factor = self.cut_high_k_off(I1_j1_k, j=j2)
-                    product = I1_j1_k_cut[:, :, None, :, :] * self.filters.filters_cut[j2][None, None, :, :, :]
-                    I2_j1j2 = torch.fft.ifftn(product, dim=(-2, -1)).abs()
-                    self.S2[:, j1, :, j2, :] = torch.mean(I2_j1j2, dim=(-2, -1)) * cut_factor
-
-
-        if reduction == 'angular difference':
-            self.s0 = self.S0
-            self.s1 = torch.mean(self.S1, dim=-1)
-            self.s2 = torch.zeros((batch_size, self.J, self.J, self.num_l_deltas), device=self.filters.device)
-            self.S2 = self.S2.permute((0, 1, 3, 2, 4))
-            for i in range(self.num_l_deltas):
-                self.s2[..., i] = torch.mean(self.S2[:, :, :, self.l_deltas_masks[i]], dim=-1)
-
-            self.s2 = self.s2[:, torch.ones((self.J, self.J), dtype=torch.bool).triu(diagonal=1)]
-            self.s2 = self.s2.swapaxes(-2, -1).flatten(-2, -1)
-            return torch.cat([self.s0[:, None], self.s1, self.s2], dim=-1)
-
-        else:
-
-            self.s0 = self.S0
-            self.s1 = torch.mean(self.S1, dim=-1)
-            self.s2 = torch.mean(self.S2, dim=(-3, -1))
-
-        if normalised:
-            self.s1 = self.s1 / self.s0[:, None]
-            self.s2 = self.s2 / self.s1[:, None]
-
-        if condensed:
-            self.s2 = self.s2[torch.ones(self.s2.shape, dtype=torch.bool).triu(diagonal=1)].reshape((self.s2.shape[0], -1))
-            return torch.cat([self.s0[:, None], self.s1, self.s2], dim=-1)
-
-        return self.s0, self.s1, self.s2
-
-    def cut_high_k_off(self, data_k, j=1):
-        dx = self.filters.cut_sizes[j] // 2
-        pre_cut_size = data_k.numel()
-
-        result = torch.cat(
-            (torch.cat(
-                (data_k[..., :dx, :dx], data_k[..., -dx:, :dx]
-                 ), -2),
-             torch.cat(
-                 (data_k[..., :dx, -dx:], data_k[..., -dx:, -dx:]
-                  ), -2)
-            ), -1)
-
-        post_cut_size = result.numel()
-        cut_factor = post_cut_size / pre_cut_size
-        return result, cut_factor
 
