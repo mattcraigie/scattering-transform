@@ -24,13 +24,12 @@ def rotation(theta):
 
 
 class Wavelet(object):
-    def __init__(self, size, num_scales, num_angles, device=torch.device('cpu')):
+    def __init__(self, size, num_scales, num_angles):
         self.filter_tensor = torch.zeros((num_scales, num_angles, size, size), dtype=torch.complex64)
         self.size = size
         self.num_scales = num_scales
         self.num_angles = num_angles
         self.assign_filters()
-        self.device = device
 
     def wavelet_function(self, scale, angle):
         raise ValueError("The function 'wavelet_function' must be overriden in the child class")
@@ -38,12 +37,15 @@ class Wavelet(object):
     def assign_filters(self):
         for scale in range(self.num_scales):
             for angle in range(self.num_scales):
-                self.filter_tensor[scale, angle] = self.wavelet_function(scale, angle).to(self.device)
+                self.filter_tensor[scale, angle] = self.wavelet_function(scale, angle)
+
+    def to(self, device):
+        self.filter_tensor.to(device)
 
 
 class Morlet(Wavelet):
-    def __init__(self, size, num_scales, num_angles, device=torch.device('cpu')):
-        super(Morlet, self).__init__(size, num_scales, num_angles, device=device)
+    def __init__(self, size, num_scales, num_angles):
+        super(Morlet, self).__init__(size, num_scales, num_angles)
 
     def wavelet_function(self, scale, angle):
         """Morlet wavelet constructed directly using j and l with a varied k0 and sigma, as per kymatio"""
@@ -66,5 +68,4 @@ class Morlet(Wavelet):
 
         morl /= 2 * torch.pi * sigma**2 / s
 
-        return morl
-
+        return torch.fft.fft2(torch.fft.fftshift(morl))
