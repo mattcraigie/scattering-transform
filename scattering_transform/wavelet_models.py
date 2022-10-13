@@ -2,30 +2,31 @@ import torch
 import numpy as np
 
 
-def gaussian(x):
-    return torch.exp(-x.transpose(-2, -1) @ x / 2)
+def gaussian(x, x0, cov):
+    shifted = x - x0
+    return torch.exp(-shifted.transpose(-2, -1) @ cov @ shifted / 2)
 
 
-def sinusoid(x, k0):
-    return torch.exp(1j * k0.transpose(-2, -1) @ x)
+def rotation_matrix(theta):
+    return torch.tensor([[torch.cos(theta), torch.sin(theta)],
+                         [-torch.sin(theta), torch.cos(theta)]])
 
 
-def admissibility_factor(A, k0):
-    return gaussian(torch.inverse(A.transpose(-2, -1)) @ k0)
+def gabor(k, k0, sigma):
+    return gaussian(k, k0, sigma)
 
 
-def morlet_function(x, A, k0):
-    return gaussian(A @ x) * (sinusoid(x, k0) - admissibility_factor(A, k0))
+def admissibility_factor(k0, sigma):
+    return gaussian(k0, 0, sigma)
 
 
-def rotation(theta):
-    return torch.tensor([[torch.cos(theta), torch.sin(theta)], [-torch.sin(theta), torch.cos(theta)]],
-                        dtype=torch.complex64)
+def morlet_function(k, k0, sigma):
+    return (gabor(k, k0, sigma) - admissibility_factor(k0, sigma) * gaussian(k, 0, sigma)).squeeze(-1).squeeze(-1)
 
 
 class Wavelet(object):
     def __init__(self, size, num_scales, num_angles):
-        self.filter_tensor = torch.zeros((num_scales, num_angles, size, size), dtype=torch.complex64)
+        self.filter_tensor = torch.zeros((num_scales, num_angles, size, size))
         self.size = size
         self.num_scales = num_scales
         self.num_angles = num_angles
@@ -36,7 +37,7 @@ class Wavelet(object):
 
     def assign_filters(self):
         for scale in range(self.num_scales):
-            for angle in range(self.num_scales):
+            for angle in range(self.num_angles):
                 self.filter_tensor[scale, angle] = self.wavelet_function(scale, angle)
 
     def to(self, device):
@@ -48,11 +49,15 @@ class Morlet(Wavelet):
         super(Morlet, self).__init__(size, num_scales, num_angles)
 
     def wavelet_function(self, scale, angle):
-        """Morlet wavelet constructed directly using j and l with a varied k0 and sigma, as per kymatio"""
-        pixels = torch.arange(- self.size // 2, self.size // 2)
-        grid_x, grid_y = torch.meshgrid(pixels, pixels)
-        grid_xy = torch.stack([grid_x, grid_y])
-        pos = grid_xy.swapaxes(0, 1).swapaxes(1, 2)[..., None].type(torch.complex64)
+        """Computes the morlet wavelet. I could make this more efficient by doing the 'extra' trick only for the
+        first couple j but this is hardly a bottleneck. """
+
+        extra = 3 if scale < 3 else 1
+        kpixels = torch.fft.fftfreq(self.size * extra)
+
+        kx, ky = torch.meshgrid(kpixels, kpixels)
+        kpos = torch.stack([kx, ky]).permute(1, 2, 0)[..., None] * extra * np.pi * 2
+
         sigma = 0.8 * 2 ** scale
         k0_mag = 3 * torch.pi / (4 * 2 ** scale)
         s = 4 / self.num_angles
@@ -60,12 +65,18 @@ class Morlet(Wavelet):
 
         a = 1 / sigma
         b = s / sigma
-        D = torch.tensor([[a, 0.], [0., b]], dtype=torch.complex64)
-        V = rotation(theta)
+        D = torch.tensor([[a, 0.],
+                          [0., b]])
+        V = rotation_matrix(theta)
         A = D @ V
-        k0 = torch.tensor([[[[k0_mag * torch.cos(theta)], [k0_mag * torch.sin(theta)]]]], dtype=torch.complex64)
-        morl = torch.squeeze(morlet_function(pos, A, k0))
 
-        morl /= 2 * torch.pi * sigma**2 / s
+        k0 = torch.tensor([k0_mag * torch.cos(theta), k0_mag * torch.sin(theta)])[None, None, :, None]
 
-        return torch.fft.fft2(torch.fft.fftshift(morl))
+        big_sigma = torch.inverse(A.T @ A)[None, None, :]
+        morl = morlet_function(kpos, k0, big_sigma)
+
+        chunked = (torch.tensor_split(b, extra, 0) for b in torch.tensor_split(morl, extra, 1))
+        chunked = [portion for tupl in chunked for portion in tupl]
+        stacked = torch.stack(chunked).sum(0)
+
+        return stacked
