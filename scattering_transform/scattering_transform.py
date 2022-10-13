@@ -97,6 +97,7 @@ class ScatteringTransform2d(object):
         for j in range(self.filters.num_scales):
             self.filters_clipped[j] = self.filters_clipped[j].to(device)
         self.device = device
+        self.clip_scaling_factors = self.clip_scaling_factors.to(device)
 
     def scattering_transform(self, fields):
         fields_k = fft2(fields)
