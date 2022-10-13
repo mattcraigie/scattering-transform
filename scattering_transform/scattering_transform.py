@@ -96,6 +96,7 @@ class ScatteringTransform2d(object):
         self.filters.to(device)
         for j in range(self.filters.num_scales):
             self.filters_clipped[j].to(device)
+            print(self.filters_clipped[j].device)
             print("toing")
         self.device = device
 
