@@ -41,7 +41,7 @@ class Wavelet(object):
                 self.filter_tensor[scale, angle] = self.wavelet_function(scale, angle)
 
     def to(self, device):
-        self.filter_tensor.to(device)
+        self.filter_tensor = self.filter_tensor.to(device)
 
 
 class Morlet(Wavelet):
