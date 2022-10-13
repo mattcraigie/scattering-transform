@@ -125,7 +125,8 @@ class ScatteringTransform2d(object):
 
     def _first_order(self, func, input_fields):
         all_output = []
-        coeffs = torch.zeros((input_fields[0].shape[0], self.filters.num_scales, self.filters.num_angles))
+        coeffs = torch.zeros((input_fields[0].shape[0], self.filters.num_scales, self.filters.num_angles),
+                             device=input_fields[0].device)
         for scale in range(self.filters.num_scales):
             in_fields = [clip_fourier_field(a, self.clip_sizes[scale])[:, None, ...] for a in input_fields]
             output = func(*in_fields, self.filters_clipped[scale][None, ...])
@@ -137,7 +138,7 @@ class ScatteringTransform2d(object):
     def _second_order(self, func, input_fields):
 
         coeffs = torch.zeros((input_fields[0][0].shape[0], self.filters.num_scales, self.filters.num_angles,
-                              self.filters.num_scales, self.filters.num_angles))
+                              self.filters.num_scales, self.filters.num_angles), device=input_fields[0][0].device)
 
         for scale_1 in range(self.filters.num_scales):
             for scale_2 in range(self.filters.num_scales):
