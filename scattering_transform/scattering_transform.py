@@ -61,7 +61,7 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
 
     if reduction is None:
         s1 = s1.flatten(1, 2)
-        s2 = s2.flatten(1, 3)
+        s2 = s2.flatten(1, 4)
 
     elif reduction == 'rot_avg':
         s1 = s1.mean(-1)
