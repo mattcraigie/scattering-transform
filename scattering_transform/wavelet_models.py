@@ -41,8 +41,6 @@ class Wavelet(object):
                 self.filter_tensor[scale, angle] = self.wavelet_function(scale, angle)
 
     def to(self, device):
-        print(self.filter_tensor)
-        print(type(self.filter_tensor))
         self.filter_tensor = self.filter_tensor.to(device)
 
 
@@ -92,6 +90,3 @@ class Learnable(Morlet, torch.nn.Module):
 
     def forward(self):
         return
-
-    # def to(self, device):
-    #     self.filter_tensor = self.filter_tensor.to(device)
