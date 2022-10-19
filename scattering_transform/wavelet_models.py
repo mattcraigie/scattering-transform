@@ -90,3 +90,6 @@ class Learnable(Morlet, torch.nn.Module):
 
     def forward(self):
         return
+
+    def to(self, device):
+        self.filter_tensor = torch.nn.Parameter(self.filter_tensor.to(device))
