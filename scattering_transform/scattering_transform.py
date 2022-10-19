@@ -75,7 +75,7 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
         d = torch.abs(torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :])
         angle_bins = torch.min(num_angles - d, d)
 
-        s2_vals = torch.zeros((s2.shape[0], s2.shape[1], num_angles // 2))
+        s2_vals = torch.zeros((s2.shape[0], s2.shape[1], num_angles // 2), device=s2.device)
         for i in range(num_angles // 2):
             idx = torch.where(angle_bins == i)
             s2_vals[:, :, i] = s2[:, :, idx[0], idx[1]].mean(-1)
