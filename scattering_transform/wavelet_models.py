@@ -80,3 +80,14 @@ class Morlet(Wavelet):
         stacked = torch.stack(chunked).sum(0)
 
         return stacked
+
+
+class Learnable(Wavelet, torch.nn.Module):
+    def __init__(self, size, num_scales, num_angles):
+        Wavelet.__init__(self, size, num_scales, num_angles)
+        torch.nn.Module.__init__(self)
+        self.filter_tensor = torch.randn_like(self.filter_tensor)
+        self.filter_tensor = torch.nn.Parameter(self.filter_tensor)
+
+    def forward(self):
+        return
