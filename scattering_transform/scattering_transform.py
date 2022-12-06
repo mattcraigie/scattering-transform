@@ -69,7 +69,7 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
         s2 = s2.mean(dim=(-2, -1))
 
     elif reduction == 'ang_avg':
-        s1 = s1.flatten(1, 2)
+        s1 = s1.mean(-1)
         num_angles = s2.shape[-1]
         d = torch.abs(torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :])
         angle_bins = torch.min(num_angles - d, d)
