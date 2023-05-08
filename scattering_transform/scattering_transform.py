@@ -92,21 +92,23 @@ class ScatteringTransform2d(object):
 
         # Pre-clip the filters to speed up calculations
         self.clip_sizes = []
-        self.filters_clipped = []
         self.clip_scaling_factors = []
+
         for j in range(self.filters.num_scales):
             clip_size = scale_to_clip_size(j, self.filters.size)
             self.clip_sizes.append(clip_size)
-            self.filters_clipped.append(clip_fourier_field(filters.filter_tensor[j], clip_size))
             self.clip_scaling_factors.append(clip_size ** 2 / self.filters.size ** 2)
-
         self.clip_scaling_factors = torch.tensor(self.clip_scaling_factors)
+        self.filters_clipped = []
+        self.clip_filters()
+
+
 
     def to(self, device):
+        self.device = device
         self.filters.to(device)
         for j in range(self.filters.num_scales):
             self.filters_clipped[j] = self.filters_clipped[j].to(device)
-        self.device = device
         self.clip_scaling_factors = self.clip_scaling_factors.to(device)
 
     def scattering_transform(self, fields):
@@ -133,6 +135,13 @@ class ScatteringTransform2d(object):
 
         coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2)
         return coeffs_0, coeffs_1, coeffs_2
+
+    def clip_filters(self):
+        self.filters_clipped = []
+        for j in range(self.filters.num_scales):
+            self.filters_clipped.append(
+                clip_fourier_field(self.filters.filter_tensor[j], self.clip_sizes[j])
+            )
 
     def _first_order(self, func, input_fields):
         all_output = []
