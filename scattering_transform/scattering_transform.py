@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch.fft import fft2, ifft2
 
-from scattering_transform.wavelet_models import Wavelet
+from scattering_transform.filters import FilterBank
 
 
 def scattering_operation(input_a: torch.Tensor, input_b: torch.Tensor) -> torch.Tensor:
@@ -85,7 +85,7 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
 
 class ScatteringTransform2d(object):
 
-    def __init__(self, filters: Wavelet):
+    def __init__(self, filters: FilterBank):
         super(ScatteringTransform2d, self).__init__()
         self.filters = filters
         self.device = torch.device('cpu')
