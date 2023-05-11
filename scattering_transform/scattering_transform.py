@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from torch.fft import fft2, ifft2
-
 from scattering_transform.filters import FilterBank
 
 
@@ -85,6 +84,8 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
 
 class ScatteringTransform2d(object):
 
+    # todo: make the cut sizes more customisable so we can go quicker. There's still wasted processing.
+
     def __init__(self, filters: FilterBank):
         super(ScatteringTransform2d, self).__init__()
         self.filters = filters
@@ -112,6 +113,9 @@ class ScatteringTransform2d(object):
         self.clip_scaling_factors = self.clip_scaling_factors.to(device)
 
     def scattering_transform(self, fields):
+        if len(fields.shape) != 3:
+            raise ValueError("The input fields should have shape (batch, size, size)")
+
         fields_k = fft2(fields)
 
         coeffs_0 = torch.mean(fields, dim=(-2, -1)).unsqueeze(1)
