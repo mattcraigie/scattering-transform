@@ -50,10 +50,10 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
 
     # Normalisation
     if normalise_s2:
-        s2 /= s1[:, :, :, None, None]
+        s2 = s2 / s1[:, :, :, None, None]
 
     if normalise_s1:
-        s1 /= s0[:, :, None]
+        s1 = s1 / s0[:, :, None]
 
     # Reduction by averaging
     scale_idx = torch.triu_indices(s1.shape[1], s1.shape[1], offset=1)
@@ -102,8 +102,6 @@ class ScatteringTransform2d(object):
         self.clip_scaling_factors = torch.tensor(self.clip_scaling_factors)
         self.filters_clipped = []
         self.clip_filters()
-
-
 
     def to(self, device):
         self.device = device
