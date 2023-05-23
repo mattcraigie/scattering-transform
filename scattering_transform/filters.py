@@ -478,34 +478,82 @@ class SubNet(nn.Module):
         return self.network(x)
 
 
-class FourierSubNetFilters(TrainableFilterBank):
+class FourierSubNetFilters(FilterBank):
     def __init__(self, size, num_scales, num_angles, hidden_sizes=(3,)):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
         self.subnet = SubNet(hidden_sizes=hidden_sizes)
 
         self.net_ins = []
-        for j in range(num_scales):
-            out_size = self.scale2size(j)
-            xspace = torch.linspace(-1, 1, out_size).abs()
-            yspace = torch.linspace(-1, 1, out_size)
+        self.scaled_sizes = []
+        for scale in range(num_scales):
+            scaled_size = self.scale2size(scale)
+            self.scaled_sizes.append(scaled_size)
+            xspace = torch.linspace(-1, 1, scaled_size // 2)
+            yspace = torch.linspace(0, 1, scaled_size - 1)
             grid = torch.stack(torch.meshgrid(xspace, yspace)).flatten(1, 2).swapaxes(0, 1)
-            net_in = torch.cat([grid, torch.ones(out_size**2, 1) * j], dim=1)
+            net_in = torch.cat([grid, torch.ones(grid.shape[0], 1) * scale], dim=1)
             self.net_ins.append(net_in)
 
-        self.rotation_grid = self._make_affine_grid()
+        self.rotation_grids = self._make_affine_grid()
         self.update_filters()
 
-    def _scale_filter(self, out_scale):
-        out_size = self.scale2size(out_scale)
-        result = self.subnet(self.net_ins[out_scale])
-        result = result.reshape(out_size, out_size)
-        pad_factor = (self.size - out_size) // 2
-        padded = pad(result, (pad_factor, pad_factor, pad_factor, pad_factor))
+
+    def _make_scaled_filter(self, scale):
+        x = self.subnet(self.net_ins[scale])
+        x = x.reshape(self.scaled_sizes[scale] // 2, self.scaled_sizes[scale] - 1)
+        x = torch.cat([x.flip(dims=(0,)), x[1:]], dim=0)
+        return x
+
+    def scale2size(self, scale: float) -> int:
+        result = int(self.size / 2 ** scale)
+        if result % 2 != 0:
+            result += 1
+        return result
+
+    def _pad_filters(self, x, scale):
+        pad_factor = (self.size - self.scaled_sizes[scale]) // 2
+        padded = pad(x, (pad_factor+1, pad_factor, pad_factor+1, pad_factor))  # +1 for the nyq
         return padded
 
+    def update_filters(self):
+        filters = []
+        for scale in range(self.num_scales):
+            scaled_filter = self._make_scaled_filter(scale)
+            rotated_filters = self._rotate_filter(scaled_filter, scale)
+            padded_filters = self._pad_filters(rotated_filters, scale)
+            filters.append(padded_filters)
+        self.filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
+
     def to(self, device):
-        super(FourierSubNetFilters, self).to(device)
+        # super(FourierSubNetFilters, self).to(device)
+        self.filter_tensor = self.filter_tensor.to(device)
         self.subnet.to(device)
         for j in range(self.num_scales):
             self.net_ins[j] = self.net_ins[j].to(device)
+            self.rotation_grids[j] = self.rotation_grids[j].to(device)
 
+
+    def _make_affine_grid(self) -> list[torch.Tensor]:
+        rotation_matrices = []
+        for angle in range(self.num_angles):
+            theta = angle * np.pi / self.num_angles
+            rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
+                                    [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
+            rotation_matrices.append(rot_mat)
+        rotation_matrices = torch.stack(rotation_matrices)
+
+        affine_grids = []
+        for scale in range(self.num_scales):
+            affine_grids.append(
+                affine_grid(
+                    rotation_matrices,
+                    [self.num_angles, 1, self.scaled_sizes[scale] - 1, self.scaled_sizes[scale] - 1],
+                    align_corners=True)
+            )
+
+        return affine_grids
+
+
+    def _rotate_filter(self, x: torch.Tensor, scale: int) -> torch.Tensor:
+        filters = x[None, None, :, :].expand(self.num_angles, -1, -1, -1)
+        return grid_sample(filters, grid=self.rotation_grids[scale]).squeeze(1)
