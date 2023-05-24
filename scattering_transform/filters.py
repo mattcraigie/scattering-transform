@@ -464,14 +464,13 @@ class FourierTrainable(TrainableFilterBank):
 
 
 class SubNet(nn.Module):
-    def __init__(self, num_ins=3, num_outs=1, hidden_sizes=(3,)):
+    def __init__(self, num_ins=2, num_outs=1, hidden_sizes=(3, 3), activation=nn.LeakyReLU):
         super(SubNet, self).__init__()
         layers = []
         sizes = [num_ins] + list(hidden_sizes) + [num_outs]
         for i in range(len(sizes) - 1):
             layers.append(nn.Linear(sizes[i], sizes[i + 1]))
-            layers.append(nn.LeakyReLU())
-        layers.pop()
+            layers.append(activation())
         self.network = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -479,20 +478,22 @@ class SubNet(nn.Module):
 
 
 class FourierSubNetFilters(FilterBank):
-    def __init__(self, size, num_scales, num_angles, hidden_sizes=(3,)):
+    def __init__(self, size, num_scales, num_angles, subnet=None):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
-        self.subnet = SubNet(hidden_sizes=hidden_sizes)
+        if subnet is None:
+            self.subnet = SubNet()
+        else:
+            self.subnet = subnet
 
         self.net_ins = []
         self.scaled_sizes = []
         for scale in range(num_scales):
             scaled_size = self.scale2size(scale)
             self.scaled_sizes.append(scaled_size)
-            xspace = torch.linspace(-1, 1, scaled_size // 2)
-            yspace = torch.linspace(0, 1, scaled_size - 1)
+            xspace = torch.linspace(0, 1, scaled_size // 2)
+            yspace = torch.linspace(-1, 1, scaled_size - 1)
             grid = torch.stack(torch.meshgrid(xspace, yspace)).flatten(1, 2).swapaxes(0, 1)
-            net_in = torch.cat([grid, torch.ones(grid.shape[0], 1) * scale], dim=1)
-            self.net_ins.append(net_in)
+            self.net_ins.append(grid)
 
         self.rotation_grids = self._make_affine_grid()
         self.update_filters()
