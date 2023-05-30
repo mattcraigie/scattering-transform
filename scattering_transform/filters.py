@@ -30,7 +30,7 @@ class Morlet(FixedFilterBank):
         filter_tensor = create_bank(size, num_scales, num_angles, morlet_wavelet)
         super(Morlet, self).__init__(filter_tensor)
 
-
+# unused - remove or fix
 class TrainableFilterBank(FilterBank):
     def __init__(self,
                  size: int = None,
@@ -95,7 +95,7 @@ class TrainableFilterBank(FilterBank):
         super(TrainableFilterBank, self).to(device)
         self.rotation_grid = self.rotation_grid.to(device)
 
-
+# unused - remove or fix
 class FourierTrainable(TrainableFilterBank):
     def __init__(self,
                  size: int,
@@ -289,180 +289,6 @@ class FourierTrainable(TrainableFilterBank):
         self.rotation_grid = self.rotation_grid.to(device)
 
 
-# class ConfigTrainable(TrainableFilterBank):
-#     def __init__(self,
-#                  size: int,
-#                  num_scales: int,
-#                  num_angles: int,
-#                  base_scale: int = 0,
-#                  init_filter: torch.Tensor = None,
-#                  mode = 'rect',
-#                  down_method: str = 'avg_pool',
-#                  up_method: str = 'interp'):
-#         """
-#         A trainable filter bank in Config space, to be used for the scattering transform. The base filter is trainable,
-#         (and acts as the scattering transform's mother wavelet) and is resized and rotated to the various filter
-#         scales and angles (often denoted by J and L)
-#
-#         Parameters
-#         ----------
-#         size : int
-#             The size of the square filter.
-#         num_scales : int
-#             The number of scales (filter sizes) to use.
-#         num_angles : int
-#             The number of rotations to use.
-#         base_scale : int
-#             The scale of the smallest filter, which is assumed to be square.
-#         init_filter : torch.Tensor
-#             The initial filter to use, which should have the same dimensions as the smallest filter.
-#         down_method : str
-#             The method used to downsample the filter during scaling. Either 'avg_pool' or 'interp'.
-#         up_method : str
-#             The method used to upsample the filter during scaling. Only 'interp' is currently supported.
-#
-#         Returns
-#         -------
-#         torch.nn.Module
-#             A PyTorch module object.
-#         """
-#
-#         super(ConfigTrainable, self).__init__(size, num_scales, num_angles)
-#
-#         assert size % 2 == 0, "Filter size must be an even number"
-#         assert mode in ['rect', 'polar'], 'Mode must be either rect or polar'
-#
-#         self.mode = mode
-#         self.down_method = down_method
-#         self.up_method = up_method
-#
-#         self.base_scale = base_scale
-#         self.base_size = self.scale2size(base_scale)
-#         half = self.base_size // 2
-#
-#         # if mode is rect, block_a is real and block_b is imag
-#         # if mode is polar, block_a is abs and block_b is angle
-#         self.middle = nn.Parameter(torch.randn(1, half), requires_grad=True)
-#         self.block_a = nn.Parameter(torch.randn(half, half), requires_grad=True)
-#         self.block_b = nn.Parameter(torch.randn(half, half), requires_grad=True)
-#
-#         self.main_block = torch.zeros(self.base_size, half - 1)
-#         self.zero_freq = torch.zeros(self.base_size, 1)
-#         self.nyquist_freq = torch.zeros(self.base_size, 1)
-#
-#         # make affine grid for num_rotations here, call it during forward
-#         self.rotation_grid = self._make_affine_grid()
-#
-#         # update the filters, i.e. scale and rotate the base filter. This fills the filter tensor attribute.
-#         self.update_filters()
-#
-#
-#
-#     def _scale_filter(self, out_scale: int) -> torch.Tensor:
-#         """
-#         Scales the base filter to the desired scale.
-#
-#         Parameters
-#         ----------
-#         out_scale : int
-#             The desired scale of the filter, and integer less than the num_scales attribute.
-#
-#         Returns
-#         -------
-#         torch.Tensor
-#             The resampled (up or down) and appropriately padded filter tensor.
-#         """
-#         k_filter = self._arrange_filter(self.block_a, self.block_b, self.middle)
-#         if self.base_scale == out_scale:
-#             return k_filter
-#
-#
-#         # scaling up
-#         out_size = self.scale2size(out_scale)
-#         scale_factor = out_size / self.scale2size(self.base_scale)
-#
-#         if scale_factor < 1:
-#             a, b, m = self._downsample(scale_factor)
-#         else:
-#             a, b, m = self._upsample(scale_factor)
-#
-#         arranged = self._arrange_filter(a, b, m)
-#
-#         # applying padding
-#         pad_factor = (self.size - out_size) // 2
-#         padded = pad(arranged, (pad_factor, pad_factor, pad_factor, pad_factor))
-#
-#         return padded
-#
-#     def _downsample(self, scale_factor: float) -> tuple[torch.Tensor, torch.Tensor]:
-#         """
-#         Downsamples the filter tensor using the specified down_method attribute.
-#
-#         Parameters
-#         ----------
-#         scale_factor : float
-#             The factor by which to downsample the filter.
-#
-#         Returns
-#         -------
-#         Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-#             The downsampled main filter tensor, zero frequency tensor, and Nyquist frequency tensor.
-#         """
-#
-#         if self.down_method == 'interp':
-#             a_down = interpolate(self.block_a.unsqueeze(0).unsqueeze(0),
-#                                     scale_factor=(scale_factor, scale_factor), mode='bicubic')[0, 0]
-#             b_down = interpolate(self.block_b.unsqueeze(0).unsqueeze(0),
-#                                     scale_factor=(scale_factor, scale_factor), mode='bicubic')[0, 0]
-#         elif self.down_method == 'avg_pool':
-#             inv_factor = int(1 / scale_factor)
-#             a_down = avg_pool2d(self.block_a.unsqueeze(0).unsqueeze(0),
-#                                    kernel_size=inv_factor, stride=inv_factor)[0, 0]
-#             b_down = avg_pool2d(self.block_b.unsqueeze(0).unsqueeze(0),
-#                                    kernel_size=inv_factor, stride=inv_factor)[0, 0]
-#         else:
-#             raise ValueError("Invalid value for down_method argument. Allowed values are 'interp' and 'avg_pool'.")
-#         return a_down, b_down
-#
-#     def _arrange_filter_x(self,
-#                         block_a: torch.Tensor,
-#                         block_b: torch.Tensor,
-#                         middle: torch.Tensor) -> torch.Tensor:
-#         """Arrange the filter"""
-#
-#         if self.mode == 'polar':
-#             block_a = torch.relu(block_a)
-#             block_b = torch.clamp(block_b, min=-1, max=1)
-#             combined = block_a * torch.exp(2j * block_b)
-#         else:
-#             combined = block_a + 1j * block_b
-#
-#         full = torch.cat([middle, combined, torch.flip(torch.conj(combined), dims=(0,))], dim=0)
-#         k = torch.fft.fftshift(torch.fft.irfft2(full))
-#
-#         # self.main_block =
-#
-#         return k
-#
-#     def _arrange_filter_k(self, main_block: torch.Tensor,
-#                         zero_freq: torch.Tensor,
-#                         nyquist_freq: torch.Tensor) -> torch.Tensor:
-#         res = torch.cat([nyquist_freq,
-#                          torch.flip(main_block, dims=(1,)),
-#                          zero_freq,
-#                          main_block],
-#                         dim=1)
-#         return res
-#
-#     def to(self, device: torch.device):
-#         self.a_block = torch.nn.Parameter(self.a_block.to(device), requires_grad=True)
-#         self.b_block = torch.nn.Parameter(self.b_block.to(device), requires_grad=True)
-#         self.rotation_grid = self.rotation_grid.to(device)
-#
-#     def forward(self):
-#         pass
-
-
 class SubNet(nn.Module):
     def __init__(self, num_ins=2, num_outs=1, hidden_sizes=(3, 3), activation=nn.LeakyReLU):
         super(SubNet, self).__init__()
@@ -474,10 +300,15 @@ class SubNet(nn.Module):
         self.network = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.network(x)
+        # input batch, size, size, dim
+        b, s, _, dim = x.shape
+        x = x.flatten(0, 2)
+        x = self.network(x)
+        return x.reshape(b, s, s)
 
 
 class FourierSubNetFilters(FilterBank):
+
     def __init__(self, size, num_scales, num_angles, subnet=None):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
         if subnet is None:
@@ -485,27 +316,37 @@ class FourierSubNetFilters(FilterBank):
         else:
             self.subnet = subnet
 
+        if num_angles % 2 != 0:
+            raise ValueError("num_angles must be even. This allows a significant speedup.")
+
         self.net_ins = []
         self.scaled_sizes = []
         for scale in range(num_scales):
             scaled_size = self.scale2size(scale)
             self.scaled_sizes.append(scaled_size)
-            xspace = torch.linspace(0, 1, scaled_size // 2)
-            yspace = torch.linspace(-1, 1, scaled_size - 1)
-            grid = torch.stack(torch.meshgrid(xspace, yspace)).flatten(1, 2).swapaxes(0, 1)
+
+        self.rotation_grids = self._make_grids()
+        for scale in range(num_scales):
+            grid = self.rotation_grids[scale]
             self.net_ins.append(grid)
 
-        self.rotation_grids = self._make_affine_grid()
+
         self.update_filters()
 
 
     def _make_scaled_filter(self, scale):
-        x = self.subnet(self.net_ins[scale])
-        x = x.reshape(self.scaled_sizes[scale] // 2, self.scaled_sizes[scale] - 1)
-        x = torch.cat([x.flip(dims=(0,)), x[1:]], dim=0)
-        return x
+        grid = self.net_ins[scale]
+        grid_symm = torch.cat([grid[..., 0].abs().unsqueeze(3), grid[..., 1].unsqueeze(3)], dim=3)
+        if scale == 0:
+            x = self.subnet(grid_symm/2)  # first scale is effecively zoomed in
+        else:
+            x = self.subnet(grid_symm)
+        return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
+
 
     def scale2size(self, scale: float) -> int:
+        if scale != 0:
+            scale -= 1
         result = int(self.size / 2 ** scale)
         if result % 2 != 0:
             result += 1
@@ -519,9 +360,9 @@ class FourierSubNetFilters(FilterBank):
     def update_filters(self):
         filters = []
         for scale in range(self.num_scales):
-            scaled_filter = self._make_scaled_filter(scale)
-            rotated_filters = self._rotate_filter(scaled_filter, scale)
-            padded_filters = self._pad_filters(rotated_filters, scale)
+            scaled_filters = self._make_scaled_filter(scale)
+
+            padded_filters = self._pad_filters(scaled_filters, scale)
             filters.append(padded_filters)
         self.filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
@@ -533,10 +374,9 @@ class FourierSubNetFilters(FilterBank):
             self.net_ins[j] = self.net_ins[j].to(device)
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
 
-
-    def _make_affine_grid(self) -> list[torch.Tensor]:
+    def _make_grids(self) -> list[torch.Tensor]:
         rotation_matrices = []
-        for angle in range(self.num_angles):
+        for angle in range(self.num_angles // 2):
             theta = angle * np.pi / self.num_angles
             rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
                                     [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
@@ -548,13 +388,8 @@ class FourierSubNetFilters(FilterBank):
             affine_grids.append(
                 affine_grid(
                     rotation_matrices,
-                    [self.num_angles, 1, self.scaled_sizes[scale] - 1, self.scaled_sizes[scale] - 1],
+                    [self.num_angles // 2, 1, self.scaled_sizes[scale] - 1, self.scaled_sizes[scale] - 1],
                     align_corners=True)
             )
 
         return affine_grids
-
-
-    def _rotate_filter(self, x: torch.Tensor, scale: int) -> torch.Tensor:
-        filters = x[None, None, :, :].expand(self.num_angles, -1, -1, -1)
-        return grid_sample(filters, grid=self.rotation_grids[scale]).squeeze(1)

@@ -87,6 +87,7 @@ class ScatteringTransform2d(object):
     # todo: make the cut sizes more customisable so we can go quicker. There's still wasted processing.
     # todo: add in a pre-fft option to prevent field from needing fft
     # todo: change the code to take in (batch, channels, size, size) and have the option to cross between channels
+    # todo: fix normalisations so they tend to fall in a more reasonable range, relative to GRF
 
     def __init__(self, filters: FilterBank):
         super(ScatteringTransform2d, self).__init__()
