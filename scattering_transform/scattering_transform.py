@@ -113,11 +113,11 @@ class Reducer(torch.nn.Module):
         L = filters.num_angles
 
         if reduction is None:
-            self.out_size = 1 + J * L + (J * (J - 1) // 2) * L ** 2
+            self.num_outputs = 1 + J * L + (J * (J - 1) // 2) * L ** 2
         elif reduction == 'rot_avg':
-            self.out_size = 1 + J + J * (J - 1) // 2
+            self.num_outputs = 1 + J + J * (J - 1) // 2
         elif reduction == 'ang_avg':
-            self.out_size = 1 + J + (J * (J - 1) // 2) * (L // 2 + 1)
+            self.num_outputs = 1 + J + (J * (J - 1) // 2) * (L // 2 + 1)
 
     def forward(self, s):
 
