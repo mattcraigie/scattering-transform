@@ -290,7 +290,7 @@ class FourierTrainable(TrainableFilterBank):
 
 
 class SubNet(nn.Module):
-    def __init__(self, num_ins=2, num_outs=1, hidden_sizes=(3, 3), activation=nn.LeakyReLU):
+    def __init__(self, num_ins=3, num_outs=1, hidden_sizes=(3, 3), activation=nn.LeakyReLU):
         super(SubNet, self).__init__()
         layers = []
         sizes = [num_ins] + list(hidden_sizes) + [num_outs]
@@ -330,19 +330,19 @@ class FourierSubNetFilters(FilterBank):
             grid = self.rotation_grids[scale]
             self.net_ins.append(grid)
 
-
         self.update_filters()
-
 
     def _make_scaled_filter(self, scale):
         grid = self.net_ins[scale]
-        grid_symm = torch.cat([grid[..., 0].abs().unsqueeze(3), grid[..., 1].unsqueeze(3)], dim=3)
-        if scale == 0:
-            x = self.subnet(grid_symm/2)  # first scale is effecively zoomed in
-        else:
-            x = self.subnet(grid_symm)
-        return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
+        # make cylindrical
+        grid = torch.stack([torch.cos(grid[..., 0]), torch.sin(grid[..., 0]), grid[..., 1].abs()], dim=-1)
+
+        if scale == 0:
+            x = self.subnet(grid / 2)  # first scale is effecively zoomed in
+        else:
+            x = self.subnet(grid)
+        return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
     def scale2size(self, scale: float) -> int:
         if scale != 0:
@@ -361,7 +361,6 @@ class FourierSubNetFilters(FilterBank):
         filters = []
         for scale in range(self.num_scales):
             scaled_filters = self._make_scaled_filter(scale)
-
             padded_filters = self._pad_filters(scaled_filters, scale)
             filters.append(padded_filters)
         self.filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
