@@ -25,6 +25,7 @@ def clip_fourier_field(field: torch.Tensor, final_size: int) -> torch.Tensor:
     :param final_size: The final size
     :return: the field after clipping
     """
+    assert final_size <= field.shape[-1], "Final size must be smaller than or same as the input field size"
     cl = final_size // 2
     result = torch.cat((torch.cat((field[..., :cl, :cl], field[..., -cl:, :cl]), -2),
                         torch.cat((field[..., :cl, -cl:], field[..., -cl:, -cl:]), -2)
@@ -73,13 +74,16 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
         d = torch.abs(torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :])
         angle_bins = torch.min(num_angles - d, d)
         num_bins = torch.unique(angle_bins).shape[0]
+        print(s2.shape)
         s2_vals = torch.zeros((s2.shape[0], s2.shape[1], num_bins), device=s2.device)
         for i in range(num_bins):
             idx = torch.where(angle_bins == i)
+            print(s2_vals[:, :, i].shape)
+            print(s2[:, :, idx[0], idx[1]].mean(-1).shape)
             s2_vals[:, :, i] = s2[:, :, idx[0], idx[1]].mean(-1)
         s2 = s2_vals.flatten(1, 2)
 
-    return
+    return torch.cat((s0, s1, s2), dim=1)
 
 
 class Reducer(torch.nn.Module):
@@ -123,17 +127,25 @@ class Reducer(torch.nn.Module):
 
         s0, s1, s2 = s
 
+        # shorthands for cleaner code
+        sln = slice(None)  # SLice None
+        batch_dims = s0.ndim - 1
+        batch_sizes = list(s0.shape[:-1])
+        bds = [sln]*batch_dims  # Batch Dim Slice nones
+
+
         # Normalisation
         if self.normalise_s2:
-            s2 = s2 / s1[:, :, :, None, None]
+            s2 = s2 / s1[bds + [sln, sln, None, None]]
 
         # Reduction by averaging
-        scale_idx = torch.triu_indices(s1.shape[1], s1.shape[1], offset=1)
-        s2 = s2[:, scale_idx[0], :, scale_idx[1]].swapaxes(0, 1)
+        scale_idx = torch.triu_indices(s1.shape[-1], s1.shape[-1], offset=1)
+        s2 = s2[bds + [scale_idx[0], sln, scale_idx[1]]]
+        s2 = s2.permute([i + 1 for i in range(batch_dims)] + [0, s2.ndim-2, s2.ndim-1])
 
         if self.reduction is None:
-            s1 = s1.flatten(1, 2)
-            s2 = s2.flatten(1, 3)
+            s1 = s1.flatten(-2, -1)
+            s2 = s2.flatten(-3, -1)
 
         elif self.reduction == 'rot_avg':
             s1 = s1.mean(-1)
@@ -145,20 +157,18 @@ class Reducer(torch.nn.Module):
             d = torch.abs(torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :])
             angle_bins = torch.min(num_angles - d, d)
             num_bins = torch.unique(angle_bins).shape[0]
-            s2_vals = torch.zeros((s2.shape[0], s2.shape[1], num_bins), device=s2.device)
+            s2_vals = torch.zeros((batch_sizes + [s2.shape[-3], num_bins]), device=s2.device)
             for i in range(num_bins):
                 idx = torch.where(angle_bins == i)
-                s2_vals[:, :, i] = s2[:, :, idx[0], idx[1]].mean(-1)
-            s2 = s2_vals.flatten(1, 2)
-
-        return torch.cat((s0, s1, s2), dim=1)
-
+                s2_vals[bds + [sln, i]] = s2[bds + [sln, idx[0], idx[1]]].mean(-1)
+            s2 = s2_vals.flatten(-2, -1)
+        return torch.cat((s0, s1, s2), dim=batch_dims)
 
 
-class ScatteringTransform2d(object):
+class ScatteringTransform2d(torch.nn.Module):
 
-    # todo: make the cut sizes more customisable so we can go quicker. There's still wasted processing.
-    # todo: change the code to take in (batch, channels, size, size) and have the option to cross between channels
+    # todo: change the code to take in cross_dim on the forward pass and have the option to cross between channels in
+    #       that dim
 
     def __init__(self, filters: FilterBank, clip_sizes=None):
         super(ScatteringTransform2d, self).__init__()
@@ -191,37 +201,6 @@ class ScatteringTransform2d(object):
             self.filters_clipped[j] = self.filters_clipped[j].to(device)
         self.clip_scaling_factors = self.clip_scaling_factors.to(device)
 
-    def scattering_transform(self, fields, pre_fft=False):
-        if len(fields.shape) != 3:
-            raise ValueError("The input fields should have shape (batch, size, size)")
-
-        if pre_fft:
-            fields_k = fields
-        else:
-            fields_k = fft2(fields)
-
-        coeffs_0 = torch.mean(fields, dim=(-2, -1)).unsqueeze(1)
-        coeffs_1, outputs_1 = self._first_order(scattering_operation, [fields_k, ])
-
-        inputs_2 = [fft2(i) for i in outputs_1]
-        coeffs_2 = self._second_order(scattering_operation, [inputs_2, ])
-
-        coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2)
-        return coeffs_0, coeffs_1, coeffs_2
-
-    def cross_scattering_transform(self, fields_a, fields_b):
-        fields_a_k = fft2(fields_a)
-        fields_b_k = fft2(fields_b)
-
-        coeffs_0 = torch.mean(fields_a.sqrt() * fields_b.sqrt(), dim=(-2, -1)).unsqueeze(1)  # maybe?
-        coeffs_1, outputs_1 = self._first_order(cross_scattering_operation, [fields_a_k, fields_b_k, ])
-
-        inputs_2 = [fft2(i) for i in outputs_1]
-        coeffs_2 = self._second_order(scattering_operation, [inputs_2, ])
-
-        coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2)
-        return coeffs_0, coeffs_1, coeffs_2
-
     def clip_filters(self):
         self.filters_clipped = []
         for j in range(self.filters.num_scales):
@@ -229,34 +208,73 @@ class ScatteringTransform2d(object):
                 clip_fourier_field(self.filters.filter_tensor[j], self.clip_sizes[j])
             )
 
-    def _first_order(self, func, input_fields):
+    def scattering_transform(self, fields, pre_fft=False):
+        if len(fields.shape) < 3:
+            raise ValueError("The input fields should have shape (batch, (...,) size, size)")
+
+        batch_sizes = fields.shape[:fields.ndim-2]
+
+        if pre_fft:
+            fields_k = fields
+        else:
+            fields_k = fft2(fields)
+
+        coeffs_0 = torch.mean(fields, dim=(-2, -1)).unsqueeze(-1)
+        coeffs_1, outputs_1 = self._first_order(scattering_operation, [fields_k, ], batch_sizes)
+
+        inputs_2 = [fft2(i) for i in outputs_1]
+        coeffs_2 = self._second_order(scattering_operation, [inputs_2, ], batch_sizes)
+
+        coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2, len(batch_sizes))
+        return coeffs_0, coeffs_1, coeffs_2
+
+    def _first_order(self, func, input_fields, batch_sizes):
         all_output = []
-        coeffs = torch.zeros((input_fields[0].shape[0], self.filters.num_scales, self.filters.num_angles),
-                             device=input_fields[0].device)
+        coeffs = torch.zeros(batch_sizes + (self.filters.num_scales, self.filters.num_angles),
+                             device=input_fields[0].device)  # should I replace with cat/stack?
         for scale in range(self.filters.num_scales):
-            in_fields = [clip_fourier_field(a, self.clip_sizes[scale])[:, None, ...] for a in input_fields]
-            output = func(*in_fields, self.filters_clipped[scale][None, ...])
-            coeffs[:, scale] = output.mean((-2, -1))
+            in_fields = [clip_fourier_field(a, self.clip_sizes[scale])[..., None, :, :] for a in input_fields]
+            output = func(*in_fields, self.filters_clipped[scale][[None]*len(batch_sizes)+[Ellipsis]])
+            coeffs[[slice(None)]*len(batch_sizes)+[scale]] = output.mean((-2, -1))
             all_output.append(output)
 
         return coeffs, all_output
 
-    def _second_order(self, func, input_fields):
+    def _second_order(self, func, input_fields, batch_sizes):
 
-        coeffs = torch.zeros((input_fields[0][0].shape[0], self.filters.num_scales, self.filters.num_angles,
+        coeffs = torch.zeros(batch_sizes + (self.filters.num_scales, self.filters.num_angles,
                               self.filters.num_scales, self.filters.num_angles), device=input_fields[0][0].device)
 
         for scale_1 in range(self.filters.num_scales):
             for scale_2 in range(self.filters.num_scales):
                 if scale_2 > scale_1:
-                    in_fields = [clip_fourier_field(a[scale_1], self.clip_sizes[scale_2])[:, :, None, ...] for a in
+                    in_fields = [clip_fourier_field(a[scale_1], self.clip_sizes[scale_2])[..., None, :, :] for a in
                                  input_fields]
-                    output_2 = func(*in_fields, self.filters_clipped[scale_2][None, None, ...])
-                    coeffs[:, scale_1, :, scale_2, :] = output_2.mean((-2, -1))
+                    output_2 = func(*in_fields, self.filters_clipped[scale_2][[None]*(len(batch_sizes)+1)+[Ellipsis]])
+                    coeffs[[slice(None)]*len(batch_sizes)+[scale_1, slice(None), scale_2, slice(None)]] = output_2.mean((-2, -1))
 
         return coeffs
 
-    def _rescale_coeffs(self, c1, c2):
-        c1 = c1 * self.clip_scaling_factors[None, :, None]
-        c2 = c2 * self.clip_scaling_factors[None, None, None, :, None]
+    # def cross_scattering_transform(self, fields_a, fields_b):
+    #     fields_a_k = fft2(fields_a)
+    #     fields_b_k = fft2(fields_b)
+    #
+    #     coeffs_0 = torch.mean(fields_a.sqrt() * fields_b.sqrt(), dim=(-2, -1)).unsqueeze(1)  # maybe?
+    #     coeffs_1, outputs_1 = self._first_order(cross_scattering_operation, [fields_a_k, fields_b_k, ])
+    #
+    #     inputs_2 = [fft2(i) for i in outputs_1]
+    #     coeffs_2 = self._second_order(scattering_operation, [inputs_2, ])
+    #
+    #     coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2)
+    #     return coeffs_0, coeffs_1, coeffs_2
+
+    def _rescale_coeffs(self, c1, c2, batch_dim):
+        c1 = c1 * self.clip_scaling_factors[[None] * batch_dim + [slice(None), None]]
+        c2 = c2 * self.clip_scaling_factors[[None] * batch_dim + [None, None, slice(None), None]]
         return c1, c2
+
+    def forward(self, fields, pre_fft=False, cross_dim=None):
+        if cross_dim is None:
+            return self.scattering_transform(fields, pre_fft=pre_fft)
+        else:
+            raise NotImplementedError("Cross scattering not implemented yet")

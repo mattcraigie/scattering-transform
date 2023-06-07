@@ -290,7 +290,7 @@ class FourierTrainable(TrainableFilterBank):
 
 
 class SubNet(nn.Module):
-    def __init__(self, num_ins=3, num_outs=1, hidden_sizes=(3, 3), activation=nn.LeakyReLU):
+    def __init__(self, num_ins=2, num_outs=1, hidden_sizes=(16, 16), activation=nn.LeakyReLU):
         super(SubNet, self).__init__()
         layers = []
         sizes = [num_ins] + list(hidden_sizes) + [num_outs]
@@ -335,8 +335,8 @@ class FourierSubNetFilters(FilterBank):
     def _make_scaled_filter(self, scale):
         grid = self.net_ins[scale]
 
-        # make cylindrical
-        grid = torch.stack([torch.cos(grid[..., 0]), torch.sin(grid[..., 0]), grid[..., 1].abs()], dim=-1)
+        # make symmetric
+        grid = torch.stack([grid[..., 0], grid[..., 1].abs()], dim=-1)
 
         if scale == 0:
             x = self.subnet(grid / 2)  # first scale is effecively zoomed in
