@@ -46,3 +46,9 @@ class PowerSpectrum(torch.nn.Module):
         x = torch.sum(x * self.bin_masks[(None,)*batch_dims + (Ellipsis,)], dim=(-2, -1)) / self.bin_mask_sums
         return x
 
+    def to(self, device):
+        super(PowerSpectrum, self).to(device)
+        self.bin_masks = self.bin_masks.to(device)
+        self.bin_mask_sums = self.bin_mask_sums.to(device)
+        return self
+
