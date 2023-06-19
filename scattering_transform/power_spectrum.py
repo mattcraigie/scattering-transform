@@ -39,13 +39,9 @@ class PowerSpectrum(torch.nn.Module):
         x = fft2(x, norm='ortho').abs() ** 2
 
         # Bin the power spectrum
-        print(x.shape)
         x = x[..., None, :, :]
-        print(x.shape)
         x = x.repeat((1, 1, self.num_bins, 1, 1))
-        print(x.shape)
         x = torch.sum(x * self.bin_masks[(None,)*batch_dims + (Ellipsis,)], dim=(-2, -1)) / self.bin_mask_sums
-        print(x.shape)
         return x
 
     def to(self, device):
