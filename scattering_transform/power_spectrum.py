@@ -40,7 +40,7 @@ class PowerSpectrum(torch.nn.Module):
 
         # Bin the power spectrum
         x = x[..., None, :, :]
-        x = x.repeat((1, 1, self.num_bins, 1, 1))
+        x = x.repeat(((1,) * batch_dims + (self.num_bins, 1, 1)))
         x = torch.sum(x * self.bin_masks[(None,)*batch_dims + (Ellipsis,)], dim=(-2, -1)) / self.bin_mask_sums
         return x
 
