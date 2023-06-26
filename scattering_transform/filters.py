@@ -334,14 +334,8 @@ class FourierSubNetFilters(FilterBank):
 
     def _make_scaled_filter(self, scale):
         grid = self.net_ins[scale]
-
-        # make symmetric
         grid = torch.stack([grid[..., 0], grid[..., 1].abs()], dim=-1)
-
-        if scale == 0:
-            x = self.subnet(grid / 2)  # first scale is effecively zoomed in
-        else:
-            x = self.subnet(grid)
+        x = self.subnet(grid)
         return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
     def scale2size(self, scale: float) -> int:
