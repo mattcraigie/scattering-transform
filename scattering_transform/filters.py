@@ -339,8 +339,6 @@ class FourierSubNetFilters(FilterBank):
         return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
     def scale2size(self, scale: float) -> int:
-        if scale != 0:
-            scale -= 1
         result = int(self.size / 2 ** scale)
         if result % 2 != 0:
             result += 1
