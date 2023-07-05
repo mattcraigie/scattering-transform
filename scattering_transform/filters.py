@@ -205,6 +205,5 @@ class FourierDirectFilters(FilterBank):
         # super(FourierSubNetFilters, self).to(device)
         self.raw_filters = nn.ParameterList(self.raw_filters.to(device))
         self.filter_tensor = self.filter_tensor.to(device)
-        self.subnet.to(device)
         for j in range(self.num_scales):
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
