@@ -202,7 +202,6 @@ class FourierDirectFilters(FilterBank):
         self.filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
     def to(self, device):
-        # super(FourierSubNetFilters, self).to(device)
         self.raw_filters = nn.ParameterList(self.raw_filters.to(device))
         self.filter_tensor = self.filter_tensor.to(device)
         for j in range(self.num_scales):
