@@ -140,7 +140,7 @@ class FourierDirectFilters(FilterBank):
             for scale in range(self.num_scales):
                 scaled_size = self.scale2size(scale)
                 self.scaled_sizes.append(scaled_size)
-                raw_filters.append(torch.randn(scaled_size - 1, scaled_size // 2))
+                raw_filters.append(torch.nn.Parameter(torch.randn(scaled_size - 1, scaled_size // 2)))
 
             self.raw_filters = nn.ParameterList(raw_filters)
 
