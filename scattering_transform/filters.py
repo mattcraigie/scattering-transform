@@ -51,13 +51,13 @@ class SubNet(nn.Module):
 
 class FourierSubNetFilters(FilterBank):
 
-    def __init__(self, size, num_scales, num_angles, subnet=None, scale_variant=False):
+    def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
         if subnet is None:
             self.subnet = SubNet()
         else:
             self.subnet = subnet
-        self.scale_variant = scale_variant
+        self.scale_invariant = scale_invariant
 
         if num_angles % 2 != 0:
             raise ValueError("num_angles must be even. This allows a significant speedup.")
@@ -78,7 +78,7 @@ class FourierSubNetFilters(FilterBank):
     def _make_scaled_filter(self, scale):
         grid = self.net_ins[scale]
         grid = torch.stack([grid[..., 0], grid[..., 1].abs()], dim=-1)
-        if self.scale_variant:
+        if self.scale_invariant:
             grid = torch.cat([grid, scale * torch.ones_like(grid[..., :1])], dim=-1)
         x = self.subnet(grid)
         return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
