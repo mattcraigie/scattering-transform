@@ -5,7 +5,7 @@ from scipy.special import erf
 
 
 def create_bank(size, num_scales, num_angles, wavelet_function):
-    filter_tensor = torch.zeros(num_scales, num_angles, size, size)
+    filter_tensor = torch.zeros(num_scales, num_angles, size, size, dtype=torch.complex64)
     for scale in range(num_scales):
         for angle in range(num_angles):
             filter_tensor[scale, angle] = wavelet_function(size, scale, angle, num_scales, num_angles)
@@ -91,23 +91,16 @@ def complex_sinusoid(x, beta):
 
 
 def skew_wavelet(size, scale, angle, num_scales, num_angles):
-    alpha_mag = 0.8
-    beta_mag = 3 * np.pi / 4
-    alpha = np.array([alpha_mag, alpha_mag])
-    beta = np.array([beta_mag, beta_mag])
-
-    xx, yy = np.meshgrid(np.linspace(-3, 3, size), np.linspace(-3, 3, size))
+    alpha = np.array([5, 5])[:, np.newaxis]
+    beta = np.array([0.5, 0.5])
+    xx, yy = np.meshgrid(np.linspace(-5, 5, size), np.linspace(-5, 5, size))
     x = np.array([xx, yy]).swapaxes(0, 2).swapaxes(0, 1)[..., np.newaxis]
-
     theta = torch.tensor(2 * (int(num_angles - num_angles / 2 - 1) - angle) * torch.pi / num_angles)
-    print(x.shape)
-    print(rotation_matrix(theta).numpy().shape)
     x_rotated = x.swapaxes(-2, -1) @ rotation_matrix(theta).numpy()
-    print(x_rotated.shape)
     x_scaled_and_rotated = x_rotated.swapaxes(-2, -1) * 2 ** scale
-
-    wavelet = skew_normal(x_scaled_and_rotated, alpha) * complex_sinusoid(x_scaled_and_rotated, beta)
-    wavelet_k = np.fft.fft2(np.fft.fftshift(wavelet))
+    wavelet = 2 * skew_normal(x_scaled_and_rotated, alpha) * complex_sinusoid(x_scaled_and_rotated, beta)
+    wavelet = wavelet[:, :, 0, 0]
+    wavelet_k = np.fft.fft2(np.fft.fftshift(wavelet, axes=(0, 1)))
     return torch.from_numpy(wavelet_k)
 
 
