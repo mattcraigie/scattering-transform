@@ -99,7 +99,8 @@ def skew_wavelet(size, scale, angle, num_scales, num_angles):
     xx, yy = np.meshgrid(np.linspace(-3, 3, size), np.linspace(-3, 3, size))
     x = np.array([xx, yy]).swapaxes(0, 2).swapaxes(0, 1)[..., np.newaxis]
 
-    x_rotated = x @ rotation_matrix(2 * angle * np.pi / num_angles)
+    theta = torch.tensor(2 * (int(num_angles - num_angles / 2 - 1) - angle) * torch.pi / num_angles)
+    x_rotated = x @ rotation_matrix(theta)
     x_scaled_and_rotated = x_rotated * 2 ** scale
 
     wavelet = skew_normal(x_scaled_and_rotated, alpha) * complex_sinusoid(x_scaled_and_rotated, beta)
