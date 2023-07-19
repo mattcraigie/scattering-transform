@@ -124,7 +124,7 @@ def complex_sinusoid(x, beta):
 def skew_wavelet(size, scale, angle, num_scales, num_angles):
     xx, yy = np.meshgrid(np.linspace(-5, 5, size), np.linspace(-5, 5, size))
     x = np.array([xx, yy]).swapaxes(0, 2).swapaxes(0, 1)[..., np.newaxis]
-    theta = torch.tensor((int(num_angles - num_angles / 2 - 1) - angle) * torch.pi / num_angles)
+    theta = torch.tensor(2 * (int(num_angles - num_angles / 2 - 1) - angle) * torch.pi / num_angles)
     x_rotated = x.swapaxes(-2, -1) @ rotation_matrix(theta).numpy()
     x_scaled_and_rotated = x_rotated.swapaxes(-2, -1) / 2 ** scale
 
