@@ -128,29 +128,15 @@ def skew_wavelet(size, scale, angle, num_scales, num_angles):
     x_rotated = x.swapaxes(-2, -1) @ rotation_matrix(theta).numpy()
     x_scaled_and_rotated = x_rotated.swapaxes(-2, -1) / 2 ** scale
 
-    alpha = np.array([30, 0])
+    alpha = np.array([0, 0])
     beta = np.array([3, 0])
-    gamma = np.array([[1, 0], [0, 5]]) * 20
+    gamma = np.array([[1, 0], [0, 10]]) * 20
 
-    wavelet = 2 * skew_gaussian(x_scaled_and_rotated, gamma, alpha) * complex_sinusoid(x_scaled_and_rotated, beta)
+    wavelet = 2 * skew_gaussian(x_scaled_and_rotated, gamma, alpha)
     wavelet = wavelet[:, :, 0, 0]
-    wavelet_k1 = np.fft.fft2(np.fft.fftshift(wavelet, axes=(0, 1)))
+    wavelet_k = np.fft.fft2(np.fft.fftshift(wavelet, axes=(0, 1)))
 
-
-    xx, yy = np.meshgrid(np.linspace(-5, 5, size), np.linspace(-5, 5, size))
-    x = np.array([xx, yy]).swapaxes(0, 2).swapaxes(0, 1)[..., np.newaxis]
-    x_rotated = x.swapaxes(-2, -1) @ rotation_matrix(theta + np.pi / 2).numpy()
-    x_scaled_and_rotated = x_rotated.swapaxes(-2, -1) / 2 ** scale
-
-    alpha = np.array([30, 0])
-    beta = np.array([3, 0])
-    gamma = np.array([[1, 0], [0, 5]]) * 20
-
-    wavelet = 2 * skew_gaussian(x_scaled_and_rotated, gamma, alpha) * complex_sinusoid(x_scaled_and_rotated, beta)
-    wavelet = wavelet[:, :, 0, 0]
-    wavelet_k_2 = np.fft.fft2(np.fft.fftshift(wavelet, axes=(0, 1)))
-
-    return torch.from_numpy(wavelet_k1 + wavelet_k_2)
+    return torch.from_numpy(wavelet_k)
 
 
 
