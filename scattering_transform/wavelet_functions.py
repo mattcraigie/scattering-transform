@@ -128,7 +128,7 @@ def skew_wavelet(size, scale, angle, num_scales, num_angles):
     x_rotated = x.swapaxes(-2, -1) @ rotation_matrix(theta).numpy()
     x_scaled_and_rotated = x_rotated.swapaxes(-2, -1) / 2 ** scale
 
-    alpha = np.array([10, 0])
+    alpha = np.array([30, 0])
     beta = np.array([3, 0])
     gamma = np.array([[1, 0], [0, 5]]) * 20
 
