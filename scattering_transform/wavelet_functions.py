@@ -1,5 +1,16 @@
 import torch
 import numpy as np
+from scipy.special import erf
+
+
+
+def create_bank(size, num_scales, num_angles, wavelet_function):
+    filter_tensor = torch.zeros(num_scales, num_angles, size, size)
+    for scale in range(num_scales):
+        for angle in range(num_angles):
+            filter_tensor[scale, angle] = wavelet_function(size, scale, angle, num_scales, num_angles)
+    return filter_tensor
+
 
 
 # General functions
@@ -25,13 +36,6 @@ def admissibility_factor(k0, sigma):
 def morlet_function(k, k0, sigma):
     return (gabor(k, k0, sigma) - admissibility_factor(k0, sigma) * gaussian(k, 0, sigma)).squeeze(-1).squeeze(-1)
 
-
-def create_bank(size, num_scales, num_angles, wavelet_function):
-    filter_tensor = torch.zeros(num_scales, num_angles, size, size)
-    for scale in range(num_scales):
-        for angle in range(num_angles):
-            filter_tensor[scale, angle] = wavelet_function(size, scale, angle, num_scales, num_angles)
-    return filter_tensor
 
 
 # Wavelet Functions
@@ -68,5 +72,40 @@ def morlet_wavelet(size, scale, angle, num_scales, num_angles):
     stacked = torch.stack(chunked).sum(0)
 
     return stacked
+
+
+def normal(x):
+    return 1 / np.sqrt(2 * np.pi) * np.exp(-np.swapaxes(x, -2, -1) @ x / 2)
+
+
+def cum_dist_func(x):
+    return np.product((1 + erf(x / np.sqrt(2))) / 2, axis=2)[:, :, :, np.newaxis]
+
+
+def skew_normal(x, alpha):
+    return 2 * normal(x) * cum_dist_func(alpha * x)
+
+
+def complex_sinusoid(x, beta):
+    return np.exp(2j * np.pi * np.swapaxes(x, -2, -1) @ beta)[:, :, :, None]
+
+
+def skew_wavelet(size, scale, angle, num_scales, num_angles):
+    alpha_mag = 0.8
+    beta_mag = 3 * np.pi / 4
+    alpha = np.array([alpha_mag, alpha_mag])
+    beta = np.array([beta_mag, beta_mag])
+
+    xx, yy = np.meshgrid(np.linspace(-3, 3, size), np.linspace(-3, 3, size))
+    x = np.array([xx, yy]).swapaxes(0, 2).swapaxes(0, 1)[..., np.newaxis]
+
+    x_rotated = x @ rotation_matrix(2 * angle * np.pi / num_angles)
+    x_scaled_and_rotated = x_rotated * 2 ** scale
+
+    wavelet = skew_normal(x_scaled_and_rotated, alpha) * complex_sinusoid(x_scaled_and_rotated, beta)
+    wavelet_k = np.fft.fft2(np.fft.fftshift(wavelet))
+    return wavelet_k
+
+
 
 

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import interpolate, pad, grid_sample, affine_grid, avg_pool2d, avg_pool1d
 import numpy as np
-from scattering_transform.wavelet_functions import create_bank, morlet_wavelet
+from scattering_transform.wavelet_functions import create_bank, morlet_wavelet, skew_wavelet
 
 
 class FilterBank(nn.Module):
@@ -29,6 +29,12 @@ class Morlet(FixedFilterBank):
     def __init__(self, size, num_scales, num_angles):
         filter_tensor = create_bank(size, num_scales, num_angles, morlet_wavelet)
         super(Morlet, self).__init__(filter_tensor)
+
+
+class Skew(FixedFilterBank):
+    def __init__(self, size, num_scales, num_angles):
+        filter_tensor = create_bank(size, num_scales, num_angles, skew_wavelet)
+        super(Skew, self).__init__(filter_tensor)
 
 
 class SubNet(nn.Module):
