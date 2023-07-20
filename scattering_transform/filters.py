@@ -57,10 +57,13 @@ class SubNet(nn.Module):
 
 class FourierSubNetFilters(FilterBank):
 
-    def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False):
+    def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=False):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
         if subnet is None:
-            self.subnet = SubNet()
+            if scale_invariant:
+                self.subnet = SubNet()
+            else:
+                self.subnet = SubNet(num_ins=3)
         else:
             self.subnet = subnet
         self.scale_invariant = scale_invariant
@@ -80,6 +83,10 @@ class FourierSubNetFilters(FilterBank):
             self.net_ins.append(grid)
 
         self.update_filters()
+
+        if init_morlet:
+            morlet = Morlet(size, num_scales + 1, num_angles)
+            self.initialise_weights(morlet.filter_tensor[1:, 5])
 
     def _make_scaled_filter(self, scale):
         grid = self.net_ins[scale]
@@ -136,22 +143,42 @@ class FourierSubNetFilters(FilterBank):
 
         return affine_grids
 
+    def initialise_weights(self, target, num_epochs=1000):
+        optimiser = torch.optim.Adam(self.subnet.parameters(), lr=0.01)
+
+        for epoch in range(num_epochs):
+            loss = torch.nn.functional.mse_loss(self.filter_tensor[:, 0], target)
+            loss.backward()
+            optimiser.step()
+            optimiser.zero_grad()
+            self.update_filters()
+
+
 
 class FourierDirectFilters(FilterBank):
     def __init__(self, size, num_scales, num_angles, init_morlet=False):
         super(FourierDirectFilters, self).__init__(size, num_scales, num_angles)
 
         if init_morlet:
-            raise NotImplementedError
-        else:
-            self.scaled_sizes = []
-            raw_filters = []
-            for scale in range(self.num_scales):
-                scaled_size = self.scale2size(scale)
-                self.scaled_sizes.append(scaled_size)
-                raw_filters.append(torch.nn.Parameter(torch.randn(scaled_size - 1, scaled_size // 2)))
+            morlet = Morlet(size, num_scales + 1, num_angles)
+            morlet_filters = morlet.filter_tensor[1:, 2]
 
-            self.raw_filters = nn.ParameterList(raw_filters)
+
+        self.scaled_sizes = []
+        raw_filters = []
+        for scale in range(self.num_scales):
+            scaled_size = self.scale2size(scale)
+            self.scaled_sizes.append(scaled_size)
+
+            if init_morlet:
+                raw = morlet_filters[scale][:scaled_size - 1, :scaled_size // 2].flip(1)
+                raw = torch.fft.fftshift(raw, dim=0)
+            else:
+                raw = torch.nn.Parameter(torch.randn(scaled_size - 1, scaled_size // 2))
+
+            raw_filters.append(raw)
+
+        self.raw_filters = nn.ParameterList(raw_filters)
 
         if num_angles % 2 != 0:
             raise ValueError("num_angles must be even. This allows a significant speedup.")

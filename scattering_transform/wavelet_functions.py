@@ -5,7 +5,7 @@ from scipy.special import erf
 
 
 def create_bank(size, num_scales, num_angles, wavelet_function):
-    filter_tensor = torch.zeros(num_scales, num_angles, size, size, dtype=torch.complex64)
+    filter_tensor = torch.zeros(num_scales, num_angles, size, size)
     for scale in range(num_scales):
         for angle in range(num_angles):
             filter_tensor[scale, angle] = wavelet_function(size, scale, angle, num_scales, num_angles)
@@ -105,7 +105,7 @@ def morlet_wavelet(size, scale, angle, num_scales, num_angles):
 
 
 # skew wavelet along 1 axis only
-def gaussian(x, cov_inv):
+def gaussian_(x, cov_inv):
     return 1 / np.sqrt(2 * np.pi) * np.exp(-np.swapaxes(x, -2, -1) @ cov_inv @ x / 2)
 
 
@@ -114,7 +114,7 @@ def phi(x, alpha):
 
 
 def skew_gaussian(x, gaussian_cov, skewness):
-    return 2 * gaussian(x, gaussian_cov) * phi(x, skewness)
+    return 2 * gaussian_(x, gaussian_cov) * phi(x, skewness)
 
 
 def complex_sinusoid(x, beta):
