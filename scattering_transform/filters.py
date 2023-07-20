@@ -86,7 +86,7 @@ class FourierSubNetFilters(FilterBank):
 
         if init_morlet:
             morlet = Morlet(size, num_scales + 1, num_angles)
-            self.initialise_weights(morlet.filter_tensor[1:, 5])
+            self.initialise_weights(morlet.filter_tensor[1:, num_angles - 1])
 
     def _make_scaled_filter(self, scale):
         grid = self.net_ins[scale]
@@ -161,7 +161,7 @@ class FourierDirectFilters(FilterBank):
 
         if init_morlet:
             morlet = Morlet(size, num_scales + 1, num_angles)
-            morlet_filters = morlet.filter_tensor[1:, 2]
+            morlet_filters = morlet.filter_tensor[1:, num_angles // 2 - 1]
 
 
         self.scaled_sizes = []
