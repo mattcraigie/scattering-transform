@@ -174,9 +174,9 @@ class FourierDirectFilters(FilterBank):
                 raw = morlet_filters[scale][:scaled_size - 1, :scaled_size // 2].flip(1)
                 raw = torch.fft.fftshift(raw, dim=0)
             else:
-                raw = torch.nn.Parameter(torch.randn(scaled_size - 1, scaled_size // 2))
+                raw = torch.randn(scaled_size - 1, scaled_size // 2)
 
-            raw_filters.append(raw)
+            raw_filters.append(torch.nn.Parameter(raw))
 
         self.raw_filters = nn.ParameterList(raw_filters)
 
