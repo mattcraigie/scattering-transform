@@ -261,7 +261,7 @@ class TrainableMorlet(FilterBank):
         if scale_invariant:
             self.a = torch.nn.Parameter(-torch.rand(1) - 1)
             if enforce_symmetry:
-                self.b = 0.
+                self.b = torch.zeros(1)
             else:
                 self.b = torch.nn.Parameter(torch.rand(1) - 0.5)
 
@@ -298,7 +298,8 @@ class TrainableMorlet(FilterBank):
         c = nn.functional.softplus(c)
 
         # I benchmarked and this is actually faster than analytically writing down the inverse in terms of a, b and c
-        cholesky_lower_triangle = torch.tensor([[a, 0], [b, c]], device=k_grid.device)
+        # do this with stack instead: cholesky_lower_triangle = torch.tensor([[a, 0], [b, c]], device=k_grid.device)
+        cholesky_lower_triangle = torch.stack([a, torch.zeros_like(a), b, c], dim=-1).reshape(-1, 2, 2)
         covariance_matrix = torch.matmul(cholesky_lower_triangle, cholesky_lower_triangle.transpose(-1, -2))
         inv_covariance_matrix = torch.inverse(covariance_matrix)
 
