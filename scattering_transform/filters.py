@@ -293,7 +293,7 @@ class TrainableMorlet(FilterBank):
         c = nn.functional.softplus(c)
 
         # I benchmarked and this is actually faster than analytically writing down the inverse in terms of a, b and c
-        cholesky_lower_triangle = torch.tensor([[a, 0], [b, c]], device=k_grid.device).cholesky()
+        cholesky_lower_triangle = torch.tensor([[a, 0], [b, c]], device=k_grid.device)
         covariance_matrix = torch.matmul(cholesky_lower_triangle, cholesky_lower_triangle.transpose(-1, -2))
         inv_covariance_matrix = torch.inverse(covariance_matrix)
 
