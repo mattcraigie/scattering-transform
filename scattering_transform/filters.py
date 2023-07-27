@@ -359,7 +359,5 @@ class TrainableMorlet(FilterBank):
     def to(self, device):
         super(TrainableMorlet, self).to(device)
         self.filter_tensor = self.filter_tensor.to(device)
-        self.subnet.to(device)
         for j in range(self.num_scales):
-            self.net_ins[j] = self.net_ins[j].to(device)
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
