@@ -12,6 +12,9 @@ class FilterBank(nn.Module):
         self.num_scales = num_scales
         self.num_angles = num_angles
 
+    def to(self, device):
+        super(FilterBank, self).to(device)
+
 
 class FixedFilterBank(FilterBank):
     def __init__(self, filter_tensor: torch.Tensor):
@@ -354,7 +357,7 @@ class TrainableMorlet(FilterBank):
         return padded
 
     def to(self, device):
-        # super(FourierSubNetFilters, self).to(device)
+        super(TrainableMorlet, self).to(device)
         self.filter_tensor = self.filter_tensor.to(device)
         self.subnet.to(device)
         for j in range(self.num_scales):
