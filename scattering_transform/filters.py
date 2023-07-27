@@ -39,6 +39,11 @@ class Skew(FixedFilterBank):
         filter_tensor = create_bank(size, num_scales, num_angles, skew_wavelet)
         super(Skew, self).__init__(filter_tensor)
 
+class Box(FixedFilterBank):
+    def __init__(self, size, num_scales, num_angles):
+        filter_tensor = torch.ones(num_scales, num_angles, size, size)
+        super(Box, self).__init__(filter_tensor)
+
 
 class SubNet(nn.Module):
     def __init__(self, num_ins=2, num_outs=1, hidden_sizes=(16, 16), activation=nn.LeakyReLU):
@@ -360,3 +365,6 @@ class TrainableMorlet(FilterBank):
         self.filter_tensor = self.filter_tensor.to(device)
         for j in range(self.num_scales):
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
+
+
+class BoxFilter(FixedFilterBank):
