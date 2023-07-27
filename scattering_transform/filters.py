@@ -298,13 +298,13 @@ class TrainableMorlet(FilterBank):
         c = nn.functional.softplus(c)
 
         # I benchmarked and this is actually faster than analytically writing down the inverse in terms of a, b and c
-        # do this with stack instead: cholesky_lower_triangle = torch.tensor([[a, 0], [b, c]], device=k_grid.device)
         cholesky_lower_triangle = torch.stack([a, torch.zeros_like(a), b, c], dim=-1).reshape(-1, 2, 2)
         covariance_matrix = torch.matmul(cholesky_lower_triangle, cholesky_lower_triangle.transpose(-1, -2))
         inv_covariance_matrix = torch.inverse(covariance_matrix)
 
         # k0 vec
-        k0_vec = torch.tensor([kr, 0], dtype=torch.float, device=k_grid.device).unsqueeze(0)
+        k0_vec = torch.stack([kr, torch.zeros_like(kr)], dim=-1).unsqueeze(0).to(k_grid.device)
+
 
         # compute the morlet wavelet on the grid k
         gaussian_at_k0 = torch.exp(-(k_grid - k0_vec) @ inv_covariance_matrix @ ((k_grid - k0_vec).transpose(-1, -2)) / 2)
