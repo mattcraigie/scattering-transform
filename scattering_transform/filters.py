@@ -257,6 +257,7 @@ class TrainableMorlet(FilterBank):
         super(TrainableMorlet, self).__init__(size, num_scales, num_angles)
 
         self.scale_invariant = scale_invariant
+        self.enforce_symmetry = enforce_symmetry
 
         if scale_invariant:
             self.a = torch.nn.Parameter(-torch.rand(1) - 1)
@@ -366,4 +367,5 @@ class TrainableMorlet(FilterBank):
         self.filter_tensor = self.filter_tensor.to(device)
         for j in range(self.num_scales):
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
-        self.b = self.b.to(device)
+        if self.enforce_symmetry:
+            self.b = self.b.to(device)
