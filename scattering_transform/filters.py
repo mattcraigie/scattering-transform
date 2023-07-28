@@ -366,3 +366,4 @@ class TrainableMorlet(FilterBank):
         self.filter_tensor = self.filter_tensor.to(device)
         for j in range(self.num_scales):
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
+        self.b = self.b.to(device)
