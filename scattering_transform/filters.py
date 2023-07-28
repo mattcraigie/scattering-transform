@@ -271,7 +271,7 @@ class TrainableMorlet(FilterBank):
         else:
             self.a = torch.nn.Parameter(-torch.rand(num_scales, 1) - 1)
             if enforce_symmetry:
-                self.b = torch.zeros(num_scales)
+                self.b = torch.zeros(num_scales, 1)
             else:
                 self.b = torch.nn.Parameter(torch.rand(num_scales, 1) - 0.5)
             self.c = torch.nn.Parameter(-torch.rand(num_scales, 1) - 1)
@@ -369,3 +369,62 @@ class TrainableMorlet(FilterBank):
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
         if self.enforce_symmetry:
             self.b = self.b.to(device)
+
+
+def scale2size(full_size, scale):
+    result = int(full_size / 2 ** scale)
+    if result % 2 != 0:
+        result += 1
+    return result
+
+
+def make_grids(num_angles, num_scales, scaled_sizes):
+    rotation_matrices = []
+    for angle in range(num_angles // 2):
+        theta = angle * np.pi / num_angles
+        rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
+                                [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
+        rotation_matrices.append(rot_mat)
+    rotation_matrices = torch.stack(rotation_matrices)
+
+    affine_grids = []
+    for scale in range(num_scales):
+        affine_grids.append(
+            torch.nn.functional.affine_grid(
+                rotation_matrices,
+                [num_angles // 2, 1, scaled_sizes[scale] - 1, scaled_sizes[scale] - 1],
+                align_corners=True)
+        )
+
+    return affine_grids
+
+
+def pad_filters(x, full_size, scale):
+    pad_factor = (full_size - scale2size(full_size, scale)) // 2
+    padded = pad(x, (pad_factor+1, pad_factor, pad_factor+1, pad_factor))  # +1 for the nyq
+    return padded
+
+
+def make_duplicate_rotations(x):
+    return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
+
+
+def dummy_func(grids, *args):
+    return torch.ones_like(grids)
+
+
+def update_filters(grids, num_scales, full_size, func, args):
+    filters = []
+    for scale in range(num_scales):
+        half_rotated_filters = func(grids, *args)
+        fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
+        padded_filters = pad_filters(fully_rotated_filters, full_size, scale)
+        filters.append(padded_filters)
+    filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
+
+
+class DirectionalBandpass(FilterBank):
+    def __init__(self, num_scales, num_angles, size):
+        super(DirectionalBandpass, self).__init__(num_scales, num_angles, size)
+
+
