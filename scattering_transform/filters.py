@@ -414,11 +414,8 @@ def make_filters(grids, num_scales, full_size, filter_func):
     filters = []
     for scale in range(num_scales):
         half_rotated_filters = filter_func(grids, scale)
-        print(half_rotated_filters.shape)
         fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
-        print(fully_rotated_filters.shape)
         padded_filters = pad_filters(fully_rotated_filters, full_size, scale)
-        print(padded_filters.shape)
         filters.append(padded_filters)
     return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
