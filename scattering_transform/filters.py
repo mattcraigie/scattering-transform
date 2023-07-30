@@ -378,7 +378,7 @@ def scale2size(full_size, scale):
     return result
 
 
-def make_grids(num_angles, num_scales, scaled_sizes):
+def make_grids(size, num_scales, num_angles):
     rotation_matrices = []
     for angle in range(num_angles // 2):
         theta = angle * np.pi / num_angles
@@ -389,10 +389,11 @@ def make_grids(num_angles, num_scales, scaled_sizes):
 
     affine_grids = []
     for scale in range(num_scales):
+        scaled_size = scale2size(size, scale)
         affine_grids.append(
             torch.nn.functional.affine_grid(
                 rotation_matrices,
-                [num_angles // 2, 1, scaled_sizes[scale] - 1, scaled_sizes[scale] - 1],
+                [num_angles // 2, 1, scaled_size - 1, scaled_size - 1],
                 align_corners=True)
         )
 
@@ -401,7 +402,7 @@ def make_grids(num_angles, num_scales, scaled_sizes):
 
 def pad_filters(x, full_size, scale):
     pad_factor = (full_size - scale2size(full_size, scale)) // 2
-    padded = pad(x, (pad_factor+1, pad_factor, pad_factor+1, pad_factor))  # +1 for the nyq
+    padded = pad(x, (pad_factor + 1, pad_factor, pad_factor + 1, pad_factor))  # +1 for the nyq
     return padded
 
 
@@ -409,22 +410,61 @@ def make_duplicate_rotations(x):
     return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
 
-def dummy_func(grids, *args):
-    return torch.ones_like(grids)
-
-
-def update_filters(grids, num_scales, full_size, func, args):
+def make_filters(grids, num_scales, full_size, filter_func):
     filters = []
     for scale in range(num_scales):
-        half_rotated_filters = func(grids, *args)
+        half_rotated_filters = filter_func(grids, scale)
+        print(half_rotated_filters.shape)
         fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
+        print(fully_rotated_filters.shape)
         padded_filters = pad_filters(fully_rotated_filters, full_size, scale)
+        print(padded_filters.shape)
         filters.append(padded_filters)
-    filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
+    return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
 
-class DirectionalBandpass(FilterBank):
-    def __init__(self, num_scales, num_angles, size):
-        super(DirectionalBandpass, self).__init__(num_scales, num_angles, size)
+class GridFuncFilter(FilterBank):
+    def __init__(self, size, num_scales, num_angles):
+        super(GridFuncFilter, self).__init__(size, num_scales, num_angles)
+        self.grids = make_grids(size, num_scales, num_angles)
+        self.filter_tensor = None
+        self.update_filters()
 
+    def update_filters(self):
+        self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function)
+
+    def filter_function(self, grid, scale):
+        # override me!
+        return torch.ones_like(grid)
+
+    def to(self, device):
+        super(GridFuncFilter, self).to(device)
+        self.grids = [g.to(device) for g in self.grids]
+        self.filter_tensor = self.filter_tensor.to(device)
+
+
+class BandPass(GridFuncFilter):
+    def __init__(self, size, num_scales, num_angles):
+        super(BandPass, self).__init__(size, num_scales, num_angles)
+
+    def filter_function(self, grid, scale):
+        radius = torch.sqrt(grid[scale][:, :, :, 0] ** 2 + grid[scale][:, :, :, 1] ** 2)
+        angle = torch.atan2(grid[scale][:, :, :, 1], grid[scale][:, :, :, 0])
+        mask = (radius > 0.5) & (radius < 1) & (angle > -np.pi / 8) & (angle < np.pi / 8)
+        filters = torch.zeros_like(grid[scale])[:, :, :, 0]
+        filters[mask] = 1
+        return filters
+
+
+class LowPass(GridFuncFilter):
+    def __init__(self, size, num_scales, num_angles):
+        super(LowPass, self).__init__(size, num_scales, num_angles)
+
+    def filter_function(self, grid, scale):
+        radius = torch.sqrt(grid[scale][:, :, :, 0] ** 2 + grid[scale][:, :, :, 1] ** 2)
+        angle = torch.atan2(grid[scale][:, :, :, 1], grid[scale][:, :, :, 0])
+        mask = (radius < 1) & (angle > -np.pi / 8) & (angle < np.pi / 8)
+        filters = torch.zeros_like(grid[scale])[:, :, :, 0]
+        filters[mask] = 1
+        return filters
 
