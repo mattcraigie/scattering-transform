@@ -39,6 +39,7 @@ class Skew(FixedFilterBank):
         filter_tensor = create_bank(size, num_scales, num_angles, skew_wavelet)
         super(Skew, self).__init__(filter_tensor)
 
+
 class Box(FixedFilterBank):
     def __init__(self, size, num_scales, num_angles):
         filter_tensor = torch.ones(num_scales, num_angles, size, size)
@@ -49,6 +50,7 @@ class SubNet(nn.Module):
     def __init__(self, num_ins=2, num_outs=1, hidden_sizes=(16, 16), activation=nn.LeakyReLU):
         super(SubNet, self).__init__()
         layers = []
+        print(num_ins, num_outs, hidden_sizes)
         sizes = [num_ins] + list(hidden_sizes) + [num_outs]
         for i in range(len(sizes) - 1):
             layers.append(nn.Linear(sizes[i], sizes[i + 1]))
@@ -63,7 +65,108 @@ class SubNet(nn.Module):
         return x.reshape(b, s, s)
 
 
-class FourierSubNetFilters(FilterBank):
+def scale2size(full_size, scale):
+    result = int(full_size / 2 ** scale)
+    if result % 2 != 0:
+        result += 1
+    return result
+
+
+def make_grids(size, num_scales, num_angles):
+    rotation_matrices = []
+    for angle in range(num_angles // 2):
+        theta = angle * np.pi / num_angles
+        rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
+                                [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
+        rotation_matrices.append(rot_mat)
+    rotation_matrices = torch.stack(rotation_matrices)
+
+    affine_grids = []
+    for scale in range(num_scales):
+        scaled_size = scale2size(size, scale)
+        affine_grids.append(
+            torch.nn.functional.affine_grid(
+                rotation_matrices,
+                [num_angles // 2, 1, scaled_size - 1, scaled_size - 1],
+                align_corners=True)
+        )
+
+    return affine_grids
+
+
+def pad_filters(x, full_size, scale):
+    pad_factor = (full_size - scale2size(full_size, scale)) // 2
+    padded = pad(x, (pad_factor + 1, pad_factor, pad_factor + 1, pad_factor))  # +1 for the nyq
+    return padded
+
+
+def make_duplicate_rotations(x):
+    return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
+
+
+def make_filters(grids, num_scales, full_size, filter_func):
+    filters = []
+    for scale in range(num_scales):
+        half_rotated_filters = filter_func(grids, scale)
+        fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
+        padded_filters = pad_filters(fully_rotated_filters, full_size, scale)
+        filters.append(padded_filters)
+    return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
+
+
+class GridFuncFilter(FilterBank):
+    def __init__(self, size, num_scales, num_angles):
+        super(GridFuncFilter, self).__init__(size, num_scales, num_angles)
+
+        if num_angles % 2 != 0:
+            raise ValueError("num_angles must be even. This allows a significant speedup.")
+
+        self.grids = make_grids(size, num_scales, num_angles)
+        self.filter_tensor = None
+
+    def update_filters(self):
+        self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function)
+
+    def filter_function(self, grid, scale):
+        # takes in grid and scale and returns a filter
+        # should be overwritten in subclasses
+        return torch.ones_like(grid)
+
+    def to(self, device):
+        super(GridFuncFilter, self).to(device)
+        self.grids = [g.to(device) for g in self.grids]
+        self.filter_tensor = self.filter_tensor.to(device)
+
+
+class BandPass(GridFuncFilter):
+    def __init__(self, size, num_scales, num_angles):
+        super(BandPass, self).__init__(size, num_scales, num_angles)
+        self.update_filters()
+
+    def filter_function(self, grid, scale):
+        radius = torch.sqrt(grid[scale][:, :, :, 0] ** 2 + grid[scale][:, :, :, 1] ** 2)
+        angle = torch.atan2(grid[scale][:, :, :, 1], grid[scale][:, :, :, 0])
+        mask = (radius > 0.5) & (radius < 1) & (angle > -np.pi / 8) & (angle < np.pi / 8)
+        filters = torch.zeros_like(grid[scale])[:, :, :, 0]
+        filters[mask] = 1
+        return filters
+
+
+class LowPass(GridFuncFilter):
+    def __init__(self, size, num_scales, num_angles):
+        super(LowPass, self).__init__(size, num_scales, num_angles)
+        self.update_filters()
+
+    def filter_function(self, grid, scale):
+        radius = torch.sqrt(grid[scale][:, :, :, 0] ** 2 + grid[scale][:, :, :, 1] ** 2)
+        angle = torch.atan2(grid[scale][:, :, :, 1], grid[scale][:, :, :, 0])
+        mask = (radius < 1) & (angle > -np.pi / 8) & (angle < np.pi / 8)
+        filters = torch.zeros_like(grid[scale])[:, :, :, 0]
+        filters[mask] = 1
+        return filters
+
+
+class FourierSubNetFilters(GridFuncFilter):
 
     def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=False):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
@@ -76,19 +179,8 @@ class FourierSubNetFilters(FilterBank):
             self.subnet = subnet
         self.scale_invariant = scale_invariant
 
-        if num_angles % 2 != 0:
-            raise ValueError("num_angles must be even. This allows a significant speedup.")
-
         self.net_ins = []
         self.scaled_sizes = []
-        for scale in range(num_scales):
-            scaled_size = self.scale2size(scale)
-            self.scaled_sizes.append(scaled_size)
-
-        self.rotation_grids = self._make_grids()
-        for scale in range(num_scales):
-            grid = self.rotation_grids[scale]
-            self.net_ins.append(grid)
 
         self.update_filters()
 
@@ -96,60 +188,17 @@ class FourierSubNetFilters(FilterBank):
             morlet = Morlet(size, num_scales + 1, num_angles)
             self.initialise_weights(morlet.filter_tensor[1:, num_angles - 1])
 
-    def _make_scaled_filter(self, scale):
-        grid = self.net_ins[scale]
-        grid = torch.stack([grid[..., 0], grid[..., 1].abs()], dim=-1)
+    def filter_function(self, grid, scale):
+        g = grid[scale]
+        g = torch.stack([g[..., 0], g[..., 1].abs()], dim=-1)
         if not self.scale_invariant:
-            grid = torch.cat([grid, scale * torch.ones_like(grid[..., :1])], dim=-1)
-        x = self.subnet(grid)
-        return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
-
-    def scale2size(self, scale: float) -> int:
-        result = int(self.size / 2 ** scale)
-        if result % 2 != 0:
-            result += 1
-        return result
-
-    def _pad_filters(self, x, scale):
-        pad_factor = (self.size - self.scaled_sizes[scale]) // 2
-        padded = pad(x, (pad_factor+1, pad_factor, pad_factor+1, pad_factor))  # +1 for the nyq
-        return padded
-
-    def update_filters(self):
-        filters = []
-        for scale in range(self.num_scales):
-            scaled_filters = self._make_scaled_filter(scale)
-            padded_filters = self._pad_filters(scaled_filters, scale)
-            filters.append(padded_filters)
-        self.filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
+            g = torch.cat([g, scale * torch.ones_like(g[..., :1])], dim=-1)
+        filters = self.subnet(g)
+        return filters
 
     def to(self, device):
-        # super(FourierSubNetFilters, self).to(device)
-        self.filter_tensor = self.filter_tensor.to(device)
+        super(FourierSubNetFilters, self).to(device)
         self.subnet.to(device)
-        for j in range(self.num_scales):
-            self.net_ins[j] = self.net_ins[j].to(device)
-            self.rotation_grids[j] = self.rotation_grids[j].to(device)
-
-    def _make_grids(self) -> list[torch.Tensor]:
-        rotation_matrices = []
-        for angle in range(self.num_angles // 2):
-            theta = angle * np.pi / self.num_angles
-            rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
-                                    [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
-            rotation_matrices.append(rot_mat)
-        rotation_matrices = torch.stack(rotation_matrices)
-
-        affine_grids = []
-        for scale in range(self.num_scales):
-            affine_grids.append(
-                affine_grid(
-                    rotation_matrices,
-                    [self.num_angles // 2, 1, self.scaled_sizes[scale] - 1, self.scaled_sizes[scale] - 1],
-                    align_corners=True)
-            )
-
-        return affine_grids
 
     def initialise_weights(self, target, num_epochs=1000):
         optimiser = torch.optim.Adam(self.subnet.parameters(), lr=0.01)
@@ -160,6 +209,82 @@ class FourierSubNetFilters(FilterBank):
             optimiser.step()
             optimiser.zero_grad()
             self.update_filters()
+
+
+class TrainableMorlet(GridFuncFilter):
+    def __init__(self, size, num_scales, num_angles, scale_invariant=True, enforce_symmetry=True):
+        super(TrainableMorlet, self).__init__(size, num_scales, num_angles)
+
+        self.scale_invariant = scale_invariant
+        self.enforce_symmetry = enforce_symmetry
+
+        if scale_invariant:
+            self.a = torch.nn.Parameter(-torch.rand(1) - 1)
+            if enforce_symmetry:
+                self.b = torch.zeros(1)
+            else:
+                self.b = torch.nn.Parameter(torch.rand(1) - 0.5)
+
+            self.c = torch.nn.Parameter(-torch.rand(1) - 1)
+            self.kr = torch.nn.Parameter(torch.rand(1) * 0.8)
+        else:
+            self.a = torch.nn.Parameter(-torch.rand(num_scales, 1) - 1)
+            if enforce_symmetry:
+                self.b = torch.zeros(num_scales, 1)
+            else:
+                self.b = torch.nn.Parameter(torch.rand(num_scales, 1) - 0.5)
+            self.c = torch.nn.Parameter(-torch.rand(num_scales, 1) - 1)
+            self.kr = torch.nn.Parameter(torch.rand(num_scales, 1) * 0.8)
+
+        self.update_filters()
+
+    def filter_function(self, grid, scale):
+        a = self.a if self.scale_invariant else self.a[scale]
+        b = self.b if self.scale_invariant else self.b[scale]
+        c = self.c if self.scale_invariant else self.c[scale]
+        kr = self.kr if self.scale_invariant else self.kr[scale]
+
+        filters = self.morlet_function(grid[scale], a, b, c, kr)
+        return filters
+
+    def morlet_function(self, k_grid, a, b, c, kr):
+
+        k_grid = k_grid.unsqueeze(-2)
+
+        # Using a Cholesky decomposition to ensure that the covariance matrix is positive definite
+        # and learn the covariance in a more convex space
+        # The L matrix is [[a, 0], [b, c]] where L @ L^T = covariance matrix
+
+        # a and c are strictly positive, b is unconstrained
+        a = nn.functional.softplus(a)
+        c = nn.functional.softplus(c)
+
+        # I benchmarked and this is actually faster than analytically writing down the inverse in terms of a, b and c
+        cholesky_lower_triangle = torch.stack([a, torch.zeros_like(a), b, c], dim=-1).reshape(-1, 2, 2)
+        covariance_matrix = torch.matmul(cholesky_lower_triangle, cholesky_lower_triangle.transpose(-1, -2))
+        inv_covariance_matrix = torch.inverse(covariance_matrix)
+
+        # k0 vec
+        k0_vec = torch.stack([kr, torch.zeros_like(kr)], dim=-1).unsqueeze(0).to(k_grid.device)
+
+
+        # compute the morlet wavelet on the grid k
+        gaussian_at_k0 = torch.exp(-(k_grid - k0_vec) @ inv_covariance_matrix @ ((k_grid - k0_vec).transpose(-1, -2)) / 2)
+        gaussian_at_k = torch.exp(-(k_grid @ inv_covariance_matrix @ (k_grid.transpose(-1, -2))) / 2)
+        admissibility = torch.exp(-k0_vec @ inv_covariance_matrix @ (k0_vec.transpose(-1, -2)) / 2)
+        morlet = gaussian_at_k0 - admissibility * gaussian_at_k
+
+        return morlet.squeeze(-1).squeeze(-1)
+
+    def to(self, device):
+        super(TrainableMorlet, self).to(device)
+        if self.enforce_symmetry:
+            self.b = self.b.to(device)
+
+
+
+
+
 
 
 class FourierDirectFilters(FilterBank):
@@ -249,219 +374,3 @@ class FourierDirectFilters(FilterBank):
         self.filter_tensor = self.filter_tensor.to(device)
         for j in range(self.num_scales):
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
-
-
-class TrainableMorlet(FilterBank):
-    def __init__(self, size, num_scales, num_angles, scale_invariant=True, enforce_symmetry=True):
-        # should make scale independent and dependent variety
-        super(TrainableMorlet, self).__init__(size, num_scales, num_angles)
-
-        self.scale_invariant = scale_invariant
-        self.enforce_symmetry = enforce_symmetry
-
-        if scale_invariant:
-            self.a = torch.nn.Parameter(-torch.rand(1) - 1)
-            if enforce_symmetry:
-                self.b = torch.zeros(1)
-            else:
-                self.b = torch.nn.Parameter(torch.rand(1) - 0.5)
-
-            self.c = torch.nn.Parameter(-torch.rand(1) - 1)
-            self.kr = torch.nn.Parameter(torch.rand(1) * 0.8)
-        else:
-            self.a = torch.nn.Parameter(-torch.rand(num_scales, 1) - 1)
-            if enforce_symmetry:
-                self.b = torch.zeros(num_scales, 1)
-            else:
-                self.b = torch.nn.Parameter(torch.rand(num_scales, 1) - 0.5)
-            self.c = torch.nn.Parameter(-torch.rand(num_scales, 1) - 1)
-            self.kr = torch.nn.Parameter(torch.rand(num_scales, 1) * 0.8)
-
-        self.scaled_sizes = []
-        for scale in range(num_scales):
-            scaled_size = self.scale2size(scale)
-            self.scaled_sizes.append(scaled_size)
-
-        self.rotation_grids = self._make_grids()
-
-        self.update_filters()
-
-    def morlet_function(self, k_grid, a, b, c, kr):
-
-        k_grid = k_grid.unsqueeze(-2)
-
-        # Using a Cholesky decomposition to ensure that the covariance matrix is positive definite
-        # and learn the covariance in a more convex space
-        # The L matrix is [[a, 0], [b, c]] where L @ L^T = covariance matrix
-
-        # a and c are strictly positive, b is unconstrained
-        a = nn.functional.softplus(a)
-        c = nn.functional.softplus(c)
-
-        # I benchmarked and this is actually faster than analytically writing down the inverse in terms of a, b and c
-        cholesky_lower_triangle = torch.stack([a, torch.zeros_like(a), b, c], dim=-1).reshape(-1, 2, 2)
-        covariance_matrix = torch.matmul(cholesky_lower_triangle, cholesky_lower_triangle.transpose(-1, -2))
-        inv_covariance_matrix = torch.inverse(covariance_matrix)
-
-        # k0 vec
-        k0_vec = torch.stack([kr, torch.zeros_like(kr)], dim=-1).unsqueeze(0).to(k_grid.device)
-
-
-        # compute the morlet wavelet on the grid k
-        gaussian_at_k0 = torch.exp(-(k_grid - k0_vec) @ inv_covariance_matrix @ ((k_grid - k0_vec).transpose(-1, -2)) / 2)
-        gaussian_at_k = torch.exp(-(k_grid @ inv_covariance_matrix @ (k_grid.transpose(-1, -2))) / 2)
-        admissibility = torch.exp(-k0_vec @ inv_covariance_matrix @ (k0_vec.transpose(-1, -2)) / 2)
-        morlet = gaussian_at_k0 - admissibility * gaussian_at_k
-
-        return morlet.squeeze(-1).squeeze(-1)
-
-    def scale2size(self, scale: float) -> int:
-        result = int(self.size / 2 ** scale)
-        if result % 2 != 0:
-            result += 1
-        return result
-
-    def _make_grids(self):
-        rotation_matrices = []
-        for angle in range(self.num_angles // 2):
-            theta = angle * np.pi / self.num_angles
-            rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
-                                    [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
-            rotation_matrices.append(rot_mat)
-        rotation_matrices = torch.stack(rotation_matrices)
-
-        affine_grids = []
-        for scale in range(self.num_scales):
-            affine_grids.append(
-                affine_grid(
-                    rotation_matrices,
-                    [self.num_angles // 2, 1, self.scaled_sizes[scale] - 1, self.scaled_sizes[scale] - 1],
-                    align_corners=True)
-            )
-
-        return affine_grids
-
-    def _make_scaled_filter(self, scale):
-        if self.scale_invariant:
-            x = self.morlet_function(self.rotation_grids[scale], self.a, self.b, self.c, self.kr)
-        else:
-            x = self.morlet_function(self.rotation_grids[scale], self.a[scale], self.b[scale], self.c[scale],
-                                     self.kr[scale])
-        return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
-
-    def update_filters(self):
-        filters = []
-        for scale in range(self.num_scales):
-            rotated_filters = self._make_scaled_filter(scale)
-            padded_filters = self._pad_filters(rotated_filters, scale)
-            filters.append(padded_filters)
-        self.filter_tensor = torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
-
-    def _pad_filters(self, x, scale):
-        pad_factor = (self.size - self.scaled_sizes[scale]) // 2
-        padded = pad(x, (pad_factor+1, pad_factor, pad_factor+1, pad_factor))  # +1 for the nyq
-        return padded
-
-    def to(self, device):
-        super(TrainableMorlet, self).to(device)
-        self.filter_tensor = self.filter_tensor.to(device)
-        for j in range(self.num_scales):
-            self.rotation_grids[j] = self.rotation_grids[j].to(device)
-        if self.enforce_symmetry:
-            self.b = self.b.to(device)
-
-
-def scale2size(full_size, scale):
-    result = int(full_size / 2 ** scale)
-    if result % 2 != 0:
-        result += 1
-    return result
-
-
-def make_grids(size, num_scales, num_angles):
-    rotation_matrices = []
-    for angle in range(num_angles // 2):
-        theta = angle * np.pi / num_angles
-        rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
-                                [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
-        rotation_matrices.append(rot_mat)
-    rotation_matrices = torch.stack(rotation_matrices)
-
-    affine_grids = []
-    for scale in range(num_scales):
-        scaled_size = scale2size(size, scale)
-        affine_grids.append(
-            torch.nn.functional.affine_grid(
-                rotation_matrices,
-                [num_angles // 2, 1, scaled_size - 1, scaled_size - 1],
-                align_corners=True)
-        )
-
-    return affine_grids
-
-
-def pad_filters(x, full_size, scale):
-    pad_factor = (full_size - scale2size(full_size, scale)) // 2
-    padded = pad(x, (pad_factor + 1, pad_factor, pad_factor + 1, pad_factor))  # +1 for the nyq
-    return padded
-
-
-def make_duplicate_rotations(x):
-    return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
-
-
-def make_filters(grids, num_scales, full_size, filter_func):
-    filters = []
-    for scale in range(num_scales):
-        half_rotated_filters = filter_func(grids, scale)
-        fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
-        padded_filters = pad_filters(fully_rotated_filters, full_size, scale)
-        filters.append(padded_filters)
-    return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
-
-
-class GridFuncFilter(FilterBank):
-    def __init__(self, size, num_scales, num_angles):
-        super(GridFuncFilter, self).__init__(size, num_scales, num_angles)
-        self.grids = make_grids(size, num_scales, num_angles)
-        self.filter_tensor = None
-        self.update_filters()
-
-    def update_filters(self):
-        self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function)
-
-    def filter_function(self, grid, scale):
-        # override me!
-        return torch.ones_like(grid)
-
-    def to(self, device):
-        super(GridFuncFilter, self).to(device)
-        self.grids = [g.to(device) for g in self.grids]
-        self.filter_tensor = self.filter_tensor.to(device)
-
-
-class BandPass(GridFuncFilter):
-    def __init__(self, size, num_scales, num_angles):
-        super(BandPass, self).__init__(size, num_scales, num_angles)
-
-    def filter_function(self, grid, scale):
-        radius = torch.sqrt(grid[scale][:, :, :, 0] ** 2 + grid[scale][:, :, :, 1] ** 2)
-        angle = torch.atan2(grid[scale][:, :, :, 1], grid[scale][:, :, :, 0])
-        mask = (radius > 0.5) & (radius < 1) & (angle > -np.pi / 8) & (angle < np.pi / 8)
-        filters = torch.zeros_like(grid[scale])[:, :, :, 0]
-        filters[mask] = 1
-        return filters
-
-
-class LowPass(GridFuncFilter):
-    def __init__(self, size, num_scales, num_angles):
-        super(LowPass, self).__init__(size, num_scales, num_angles)
-
-    def filter_function(self, grid, scale):
-        radius = torch.sqrt(grid[scale][:, :, :, 0] ** 2 + grid[scale][:, :, :, 1] ** 2)
-        angle = torch.atan2(grid[scale][:, :, :, 1], grid[scale][:, :, :, 0])
-        mask = (radius < 1) & (angle > -np.pi / 8) & (angle < np.pi / 8)
-        filters = torch.zeros_like(grid[scale])[:, :, :, 0]
-        filters[mask] = 1
-        return filters
-
