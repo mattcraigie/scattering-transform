@@ -50,7 +50,6 @@ class SubNet(nn.Module):
     def __init__(self, num_ins=2, num_outs=1, hidden_sizes=(16, 16), activation=nn.LeakyReLU):
         super(SubNet, self).__init__()
         layers = []
-        print(num_ins, num_outs, hidden_sizes)
         sizes = [num_ins] + list(hidden_sizes) + [num_outs]
         for i in range(len(sizes) - 1):
             layers.append(nn.Linear(sizes[i], sizes[i + 1]))
