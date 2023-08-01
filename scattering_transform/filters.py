@@ -167,7 +167,7 @@ class LowPass(GridFuncFilter):
 
 class FourierSubNetFilters(GridFuncFilter):
 
-    def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=False):
+    def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=False, symmetric=True):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
         if subnet is None:
             if scale_invariant:
@@ -177,6 +177,7 @@ class FourierSubNetFilters(GridFuncFilter):
         else:
             self.subnet = subnet
         self.scale_invariant = scale_invariant
+        self.symmetric = symmetric
 
         self.net_ins = []
         self.scaled_sizes = []
@@ -189,7 +190,8 @@ class FourierSubNetFilters(GridFuncFilter):
 
     def filter_function(self, grid, scale):
         g = grid[scale]
-        g = torch.stack([g[..., 0], g[..., 1].abs()], dim=-1)
+        if self.symmetric:
+            g = torch.stack([g[..., 0], g[..., 1].abs()], dim=-1)
         if not self.scale_invariant:
             g = torch.cat([g, scale * torch.ones_like(g[..., :1])], dim=-1)
         filters = self.subnet(g)

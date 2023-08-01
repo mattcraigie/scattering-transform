@@ -133,7 +133,6 @@ class Reducer(torch.nn.Module):
         batch_sizes = list(s0.shape[:-1])
         bds = [sln]*batch_dims  # Batch Dim Slice nones
 
-
         # Normalisation
         if self.normalise_s2:
             s2 = s2 / s1[bds + [sln, sln, None, None]]
