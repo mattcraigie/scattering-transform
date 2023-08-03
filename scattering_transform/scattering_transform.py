@@ -89,7 +89,6 @@ def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, nor
 class Reducer(torch.nn.Module):
 
     # todo: add in a method that takes in an index and outputs the J1, L1, J2, L2 etc that it corresponds to.
-    # todo: also double check that the reduction is actually working. I'm not sure ang avg is working properly.
 
     def __init__(self, filters, reduction, normalise_s2=False):
         """Class that reduces the scattering coefficients based on the symmetry in the field. It also performs some
@@ -162,9 +161,8 @@ class Reducer(torch.nn.Module):
             # when you got the other way, so we can just take the min of the two).
             delta = torch.min(num_angles - delta, delta)
 
-            num_angle_diffs = torch.unique(delta).shape[0]  # the number of unique distances between angles
             s2_vals_all = []
-            for i in range(num_angle_diffs):
+            for i in range(delta.min(), delta.max()+1):
                 idx = torch.where(delta == i)  # find the indices of the angles that are i apart
                 s2_vals_all.append(s2[bds + [sln, idx[0], idx[1]]].mean(-1))  # take the average of everything with the same angle difference
             s2 = torch.cat(s2_vals_all, dim=-1)
@@ -176,11 +174,12 @@ class Reducer(torch.nn.Module):
             # calculate the distance between each angle in a 2D tensor. Due to asymmetry, angles left are not equivalent
             # to angles right.
             delta = torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :]
-            num_bins = torch.unique(delta).shape[0]  # the number of unique distances between angles
+
             s2_vals_all = []
-            for i in range(num_bins):
+            for i in range(delta.min(), delta.max()+1):
                 idx = torch.where(delta == i)  # find the indices of the angles that are i apart
-                s2_vals_all.append(s2[bds + [sln, idx[0], idx[1]]].mean(-1))
+                part = s2[bds + [sln, idx[0], idx[1]]]
+                s2_vals_all.append(part.mean(-1))
             s2 = torch.cat(s2_vals_all, dim=-1)
 
         return torch.cat((s0, s1, s2), dim=batch_dims)
