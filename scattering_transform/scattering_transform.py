@@ -117,10 +117,13 @@ class Reducer(torch.nn.Module):
         self.normalise_s2 = normalise_s2
 
         # run a test field through the scattering transform to work out the required number of outputs
-        test_field = torch.randn(1, filters.size, filters.size)
+        test_field = torch.randn(1, filters.size, filters.size).to(filters.device)
         st = ScatteringTransform2d(filters)
         st.to(filters.device)
-        s = st.forward(test_field.to(filters.device))
+        print(filters.device)
+        print(st.device)
+        print(test_field.device)
+        s = st.forward(test_field)
         self.num_outputs = self.forward(s).shape[-1]
 
     def forward(self, s):
