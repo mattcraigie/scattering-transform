@@ -11,9 +11,11 @@ class FilterBank(nn.Module):
         self.size = size
         self.num_scales = num_scales
         self.num_angles = num_angles
+        self.device = None
 
     def to(self, device):
         super(FilterBank, self).to(device)
+        self.device = device
 
 
 class FixedFilterBank(FilterBank):
@@ -26,6 +28,7 @@ class FixedFilterBank(FilterBank):
     def to(self, device):
         super(FilterBank, self).to(device)
         self.filter_tensor = self.filter_tensor.to(device)
+
 
 
 class Morlet(FixedFilterBank):
