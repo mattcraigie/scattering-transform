@@ -26,9 +26,8 @@ class FixedFilterBank(FilterBank):
         super(FixedFilterBank, self).__init__(size, num_scales, num_angles)
 
     def to(self, device):
-        super(FilterBank, self).to(device)
+        super(FixedFilterBank, self).to(device)
         self.filter_tensor = self.filter_tensor.to(device)
-
 
 
 class Morlet(FixedFilterBank):

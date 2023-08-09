@@ -120,9 +120,6 @@ class Reducer(torch.nn.Module):
         test_field = torch.randn(1, filters.size, filters.size).to(filters.device)
         st = ScatteringTransform2d(filters)
         st.to(filters.device)
-        print(filters.device)
-        print(st.device)
-        print(test_field.device)
         s = st.forward(test_field)
         self.num_outputs = self.forward(s).shape[-1]
 
