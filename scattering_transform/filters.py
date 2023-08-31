@@ -57,30 +57,14 @@ class ClippedMorlet(Morlet):
             new_mid = half_cs
 
             # it is quicker to treat each case separately than work out an algorithm to do this automatically
-            # and computationally the same
-
-            # top left
+            # and computationally the same. Ordered around the square left->right first top->bottom second
             new[:, new_mid:, new_mid:] += full[:, mid-cs:mid-half_cs, mid-cs:mid-half_cs]
-
-            # top
             new[:, new_mid:, :] += full[:, mid-cs:mid-half_cs, mid-half_cs:mid+half_cs]
-
-            # top right
             new[:, new_mid:, :new_mid] += full[:, mid-cs:mid-half_cs, mid+half_cs:mid+cs]
-
-            # left
             new[:, :, new_mid:] += full[:, mid-half_cs:mid+half_cs, mid-cs:mid-half_cs]
-
-            # right
             new[:, :, :new_mid] += full[:, mid-half_cs:mid+half_cs, mid+half_cs:mid+cs]
-
-            # bot left
             new[:, :new_mid, new_mid:] += full[:, mid+half_cs:mid+cs, mid-cs:mid-half_cs]
-
-            # bot
             new[:, :new_mid, :] += full[:, mid+half_cs:mid+cs, mid-half_cs:mid+half_cs]
-
-            # bot right
             new[:, :new_mid, :new_mid] += full[:, mid+half_cs:mid+cs, mid+half_cs:mid+cs]
 
             pad_factor = (size - cs) // 2
@@ -129,7 +113,7 @@ def make_grids(size, num_scales, num_angles):
     rotation_matrices = []
     for angle in range(num_angles // 2):
         theta = angle * np.pi / num_angles
-        rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
+        rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 1/size],
                                 [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
         rotation_matrices.append(rot_mat)
     rotation_matrices = torch.stack(rotation_matrices)
@@ -140,7 +124,7 @@ def make_grids(size, num_scales, num_angles):
         affine_grids.append(
             torch.nn.functional.affine_grid(
                 rotation_matrices,
-                [num_angles // 2, 1, scaled_size - 1, scaled_size - 1],
+                [num_angles // 2, 1, scaled_size, scaled_size],
                 align_corners=True)
         )
 
@@ -149,7 +133,7 @@ def make_grids(size, num_scales, num_angles):
 
 def pad_filters(x, full_size, scale):
     pad_factor = (full_size - scale2size(full_size, scale)) // 2
-    padded = pad(x, (pad_factor + 1, pad_factor, pad_factor + 1, pad_factor))  # +1 for the nyq
+    padded = pad(x, (pad_factor, pad_factor, pad_factor, pad_factor))  # +1 for the nyq
     return padded
 
 
