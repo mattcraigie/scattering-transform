@@ -40,10 +40,10 @@ class ClippedMorlet(Morlet):
     def __init__(self, size, num_scales, num_angles):
         super(ClippedMorlet, self).__init__(size, num_scales, num_angles)
 
-        clip_sizes = []
+        self.clip_sizes = []
         for j in range(num_scales):
             cs = size // 2 ** j
-            clip_sizes.append(cs)
+            self.clip_sizes.append(cs)
             if cs == size:
                 continue
 
@@ -60,28 +60,28 @@ class ClippedMorlet(Morlet):
             # and computationally the same
 
             # top left
-            new[:, new_mid:, new_mid:] = full[:, mid-cs:mid-half_cs, mid-cs:mid-half_cs]
+            new[:, new_mid:, new_mid:] += full[:, mid-cs:mid-half_cs, mid-cs:mid-half_cs]
 
             # top
-            new[:, new_mid:, :] = full[:, mid-cs:mid-half_cs, mid-half_cs:mid+half_cs]
+            new[:, new_mid:, :] += full[:, mid-cs:mid-half_cs, mid-half_cs:mid+half_cs]
 
             # top right
-            new[:, new_mid:, :new_mid] = full[:, mid-cs:mid-half_cs, mid+half_cs:mid+cs]
+            new[:, new_mid:, :new_mid] += full[:, mid-cs:mid-half_cs, mid+half_cs:mid+cs]
 
             # left
-            new[:, :, new_mid:] = full[:, mid-half_cs:mid+half_cs, mid-cs:mid-half_cs]
+            new[:, :, new_mid:] += full[:, mid-half_cs:mid+half_cs, mid-cs:mid-half_cs]
 
             # right
-            new[:, :, :new_mid] = full[:, mid-half_cs:mid+half_cs, mid+half_cs:mid+cs]
+            new[:, :, :new_mid] += full[:, mid-half_cs:mid+half_cs, mid+half_cs:mid+cs]
 
             # bot left
-            new[:, :new_mid, new_mid:] = full[:, mid+half_cs:mid+cs, mid-cs:mid-half_cs]
+            new[:, :new_mid, new_mid:] += full[:, mid+half_cs:mid+cs, mid-cs:mid-half_cs]
 
             # bot
-            new[:, :new_mid, :] = full[:, mid+half_cs:mid+cs, mid-half_cs:mid+half_cs]
+            new[:, :new_mid, :] += full[:, mid+half_cs:mid+cs, mid-half_cs:mid+half_cs]
 
             # bot right
-            new[:, :new_mid, :new_mid] = full[:, mid+half_cs:mid+cs, mid+half_cs:mid+cs]
+            new[:, :new_mid, :new_mid] += full[:, mid+half_cs:mid+cs, mid+half_cs:mid+cs]
 
             pad_factor = (size - cs) // 2
             padded = pad(new, (pad_factor, pad_factor, pad_factor, pad_factor))
@@ -239,8 +239,8 @@ class FourierSubNetFilters(GridFuncFilter):
         self.update_filters()
 
         if init_morlet:
-            morlet = Morlet(size, num_scales + 1, num_angles)
-            self.initialise_weights(morlet.filter_tensor[1:, num_angles - 1])
+            clipped_morlet = ClippedMorlet(size, num_scales, num_angles)
+            self.initialise_weights(clipped_morlet.filter_tensor[:, num_angles - 1])
 
     def filter_function(self, grid, scale):
         g = grid[scale]
