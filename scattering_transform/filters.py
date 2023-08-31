@@ -52,7 +52,7 @@ class ClippedMorlet(Morlet):
 
             sl = slice(mid - half_cs, mid + half_cs)
 
-            full = self.filter_tensor[j]
+            full = torch.fft.fftshift(self.filter_tensor[j])
             new = full[:, sl, sl]
             new_mid = half_cs
 
@@ -85,7 +85,7 @@ class ClippedMorlet(Morlet):
 
             pad_factor = (size - cs) // 2
             padded = pad(new, (pad_factor, pad_factor, pad_factor, pad_factor))
-            self.filter_tensor[j] = padded
+            self.filter_tensor[j] = torch.fft.fftshift(padded)
 
 
 class Skew(FixedFilterBank):
