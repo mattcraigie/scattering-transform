@@ -110,23 +110,26 @@ def scale2size(full_size, scale):
 
 
 def make_grids(size, num_scales, num_angles):
-    rotation_matrices = []
-    for angle in range(num_angles // 2):
-        theta = angle * np.pi / num_angles
-        rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 1/size],
-                                [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
-        rotation_matrices.append(rot_mat)
-    rotation_matrices = torch.stack(rotation_matrices)
-
     affine_grids = []
     for scale in range(num_scales):
+
         scaled_size = scale2size(size, scale)
-        affine_grids.append(
-            torch.nn.functional.affine_grid(
-                rotation_matrices,
-                [num_angles // 2, 1, scaled_size, scaled_size],
-                align_corners=True)
-        )
+
+        rotation_matrices = []
+        for angle in range(num_angles):
+            theta = angle * np.pi / num_angles
+            shift_correction_x = -(np.cos(-theta) - np.sin(-theta)) / scaled_size
+            shift_correction_y = -(np.cos(-theta) + np.sin(-theta)) / scaled_size
+
+            rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), shift_correction_x],
+                                    [-np.sin(theta), np.cos(theta), shift_correction_y]], dtype=torch.float)
+            rotation_matrices.append(rot_mat)
+        rotation_matrices = torch.stack(rotation_matrices)
+
+        grids = torch.nn.functional.affine_grid(rotation_matrices,
+                                                [num_angles, 1, scaled_size, scaled_size],
+                                                align_corners=True)
+        affine_grids.append(grids)
 
     return affine_grids
 
@@ -144,11 +147,13 @@ def make_duplicate_rotations(x):
 def make_filters(grids, num_scales, full_size, filter_func):
     filters = []
     for scale in range(num_scales):
-        half_rotated_filters = filter_func(grids, scale)
-        fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
+        fully_rotated_filters = filter_func(grids, scale)
         padded_filters = pad_filters(fully_rotated_filters, full_size, scale)
         filters.append(padded_filters)
     return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
+
+
+
 
 
 class GridFuncFilter(FilterBank):
@@ -173,6 +178,7 @@ class GridFuncFilter(FilterBank):
         super(GridFuncFilter, self).to(device)
         self.grids = [g.to(device) for g in self.grids]
         self.filter_tensor = self.filter_tensor.to(device)
+
 
 
 class BandPass(GridFuncFilter):
@@ -205,7 +211,8 @@ class LowPass(GridFuncFilter):
 
 class FourierSubNetFilters(GridFuncFilter):
 
-    def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=False, symmetric=True):
+    def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=True,
+                 symmetric=True, periodic=True):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
         if subnet is None:
             if scale_invariant:
@@ -216,6 +223,7 @@ class FourierSubNetFilters(GridFuncFilter):
             self.subnet = subnet
         self.scale_invariant = scale_invariant
         self.symmetric = symmetric
+        self.periodic = periodic
 
         self.net_ins = []
         self.scaled_sizes = []
@@ -228,8 +236,17 @@ class FourierSubNetFilters(GridFuncFilter):
 
     def filter_function(self, grid, scale):
         g = grid[scale]
+
+        xpart = g[..., 0]
+        ypart = g[..., 1]
+
         if self.symmetric:
-            g = torch.stack([g[..., 0], g[..., 1].abs()], dim=-1)
+            # ypart = torch.cos(np.pi*g[..., 1])
+            ypart = g[..., 1].abs()
+        if self.periodic:
+            xpart = torch.sin(np.pi * g[..., 0])
+
+        g = torch.stack([xpart, ypart], dim=-1)
         if not self.scale_invariant:
             g = torch.cat([g, scale * torch.ones_like(g[..., :1])], dim=-1)
         filters = self.subnet(g)
