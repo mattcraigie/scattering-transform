@@ -81,7 +81,7 @@ class ClippedMorlet(Morlet):
             new[:, :new_mid, :] = full[:, mid+half_cs:mid+cs, mid-half_cs:mid+half_cs]
 
             # bot right
-            new[:new_mid, :new_mid] = full[mid+half_cs:mid+cs, mid+half_cs:mid+cs]
+            new[:, new_mid, :new_mid] = full[:, mid+half_cs:mid+cs, mid+half_cs:mid+cs]
 
             pad_factor = (size - cs) // 2
             padded = pad(new, (pad_factor, pad_factor, pad_factor, pad_factor))
