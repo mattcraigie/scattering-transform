@@ -36,6 +36,56 @@ class Morlet(FixedFilterBank):
         super(Morlet, self).__init__(filter_tensor)
 
 
+class ClippedMorlet(Morlet):
+    def __init__(self, size, num_scales, num_angles):
+        super(ClippedMorlet, self).__init__(size, num_scales, num_angles)
+
+        clip_sizes = []
+        for j in range(num_scales):
+            cs = size // 2 ** j
+            clip_sizes.append(cs)
+
+            mid = size // 2
+            half_cs = cs // 2
+
+            sl = slice(mid - half_cs, mid + half_cs)
+
+            full = self.filter_tensor[j]
+            new = full[:, sl, sl]
+            new_mid = half_cs
+
+            # it is quicker to treat each case separately than work out an algorithm to do this automatically
+            # and computationally the same
+
+            # top left
+            new[:, new_mid:, new_mid:] = full[:, mid-cs:mid-half_cs, mid-cs:mid-half_cs]
+
+            # top
+            new[:, new_mid:, :] = full[:, mid-cs:mid-half_cs, mid-half_cs:mid+half_cs]
+
+            # top right
+            new[:, new_mid:, :new_mid] = full[:, mid-cs:mid-half_cs, mid+half_cs:mid+cs]
+
+            # left
+            new[:, :, new_mid:] = full[:, mid-half_cs:mid+half_cs, mid-cs:mid-half_cs]
+
+            # right
+            new[:, :, :new_mid] = full[:, mid-half_cs:mid+half_cs, mid+half_cs:mid+cs]
+
+            # bot left
+            new[:, :new_mid, new_mid:] = full[:, mid+half_cs:mid+cs, mid-cs:mid-half_cs]
+
+            # bot
+            new[:, :new_mid, :] = full[:, mid+half_cs:mid+cs, mid-half_cs:mid+half_cs]
+
+            # bot right
+            new[:new_mid, :new_mid] = full[mid+half_cs:mid+cs, mid+half_cs:mid+cs]
+
+            pad_factor = (size - cs) // 2
+            padded = pad(new, (pad_factor, pad_factor, pad_factor, pad_factor))
+            self.filter_tensor[j] = padded
+
+
 class Skew(FixedFilterBank):
     def __init__(self, size, num_scales, num_angles):
         filter_tensor = create_bank(size, num_scales, num_angles, skew_wavelet)
