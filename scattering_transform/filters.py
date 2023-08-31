@@ -44,6 +44,8 @@ class ClippedMorlet(Morlet):
         for j in range(num_scales):
             cs = size // 2 ** j
             clip_sizes.append(cs)
+            if cs == size:
+                continue
 
             mid = size // 2
             half_cs = cs // 2
