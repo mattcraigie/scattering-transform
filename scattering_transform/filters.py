@@ -109,11 +109,14 @@ def scale2size(full_size, scale):
     return result
 
 
-def make_grids(size, num_scales, num_angles):
+def make_grids(size, num_scales, num_angles, scaled_sizes=None):
     affine_grids = []
     for scale in range(num_scales):
 
-        scaled_size = scale2size(size, scale)
+        if scaled_sizes is None:
+            scaled_size = scale2size(size, scale)
+        else:
+            scaled_size = scaled_sizes[scale]
 
         rotation_matrices = []
         for angle in range(num_angles):
@@ -153,17 +156,15 @@ def make_filters(grids, num_scales, full_size, filter_func):
     return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
 
-
-
-
 class GridFuncFilter(FilterBank):
-    def __init__(self, size, num_scales, num_angles):
+    def __init__(self, size, num_scales, num_angles, scaled_sizes=None):
         super(GridFuncFilter, self).__init__(size, num_scales, num_angles)
 
         if num_angles % 2 != 0:
             raise ValueError("num_angles must be even. This allows a significant speedup.")
 
-        self.grids = make_grids(size, num_scales, num_angles)
+        self.scaled_sizes = scaled_sizes
+        self.grids = make_grids(size, num_scales, num_angles, self.scaled_sizes)
         self.filter_tensor = None
 
     def update_filters(self):
@@ -212,8 +213,8 @@ class LowPass(GridFuncFilter):
 class FourierSubNetFilters(GridFuncFilter):
 
     def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=True,
-                 symmetric=True, periodic=True):
-        super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles)
+                 symmetric=True, periodic=True, scaled_sizes=None):
+        super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles, scaled_sizes=scaled_sizes)
         if subnet is None:
             if scale_invariant:
                 self.subnet = SubNet()
@@ -226,7 +227,6 @@ class FourierSubNetFilters(GridFuncFilter):
         self.periodic = periodic
 
         self.net_ins = []
-        self.scaled_sizes = []
 
         self.update_filters()
 
