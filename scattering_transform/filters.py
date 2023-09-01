@@ -137,8 +137,10 @@ def make_grids(size, num_scales, num_angles, scaled_sizes=None):
     return affine_grids
 
 
-def pad_filters(x, full_size, scale):
-    pad_factor = (full_size - scale2size(full_size, scale)) // 2
+def pad_filters(x, full_size, scaled_size):
+    if full_size == scaled_size:
+        return x
+    pad_factor = (full_size - scaled_size) // 2
     padded = pad(x, (pad_factor, pad_factor, pad_factor, pad_factor))  # +1 for the nyq
     return padded
 
@@ -147,11 +149,11 @@ def make_duplicate_rotations(x):
     return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
 
-def make_filters(grids, num_scales, full_size, filter_func):
+def make_filters(grids, num_scales, full_size, filter_func, scaled_sizes):
     filters = []
     for scale in range(num_scales):
         fully_rotated_filters = filter_func(grids, scale)
-        padded_filters = pad_filters(fully_rotated_filters, full_size, scale)
+        padded_filters = pad_filters(fully_rotated_filters, full_size, scaled_sizes[scale])
         filters.append(padded_filters)
     return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
@@ -168,7 +170,7 @@ class GridFuncFilter(FilterBank):
         self.filter_tensor = None
 
     def update_filters(self):
-        self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function)
+        self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function, self.scaled_sizes)
 
     def filter_function(self, grid, scale):
         # takes in grid and scale and returns a filter
