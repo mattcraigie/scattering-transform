@@ -57,7 +57,7 @@ class ClippedMorlet(Morlet):
             new_mid = half_cs
 
             # it is quicker to treat each case separately than work out an algorithm to do this automatically
-            # and computationally the same. Ordered around the square left->right first top->bottom second
+            # and computationally the same. Ordered around the square left->right for top, then middle, then bottom
             new[:, new_mid:, new_mid:] += full[:, mid-cs:mid-half_cs, mid-cs:mid-half_cs]
             new[:, new_mid:, :] += full[:, mid-cs:mid-half_cs, mid-half_cs:mid+half_cs]
             new[:, new_mid:, :new_mid] += full[:, mid-cs:mid-half_cs, mid+half_cs:mid+cs]
@@ -119,7 +119,7 @@ def make_grids(size, num_scales, num_angles, scaled_sizes=None):
             scaled_size = scaled_sizes[scale]
 
         rotation_matrices = []
-        for angle in range(num_angles):
+        for angle in range(num_angles // 2):
             theta = angle * np.pi / num_angles
             rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
                                     [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
@@ -127,7 +127,7 @@ def make_grids(size, num_scales, num_angles, scaled_sizes=None):
         rotation_matrices = torch.stack(rotation_matrices)
 
         grids = torch.nn.functional.affine_grid(rotation_matrices,
-                                                [num_angles, 1, scaled_size + 1, scaled_size + 1],
+                                                [num_angles // 2, 1, scaled_size + 1, scaled_size + 1],
                                                 align_corners=True)
         affine_grids.append(grids)
 
@@ -138,7 +138,7 @@ def pad_filters(x, full_size, scaled_size):
     if full_size == scaled_size - 1:
         return x
     pad_factor = (full_size - scaled_size) // 2
-    padded = pad(x, (pad_factor, pad_factor - 1, pad_factor, pad_factor - 1))  # +1 for the nyq
+    padded = pad(x, (pad_factor, pad_factor, pad_factor, pad_factor))  # +1 for the nyq
     return padded
 
 
@@ -159,7 +159,7 @@ def make_filters(grids, num_scales, full_size, filter_func, scaled_sizes):
         half_rotated_filters = filter_func(grids, scale)
         fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
         nyquist_cropped_filters = crop_extra_nyquist(fully_rotated_filters)
-        padded_filters = pad_filters(fully_rotated_filters, full_size, scaled_sizes[scale])
+        padded_filters = pad_filters(nyquist_cropped_filters, full_size, scaled_sizes[scale])
         filters.append(padded_filters)
     return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
@@ -277,6 +277,7 @@ class FourierSubNetFilters(GridFuncFilter):
             optimiser.step()
             optimiser.zero_grad()
             self.update_filters()
+
 
 
 
