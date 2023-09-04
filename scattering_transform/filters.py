@@ -121,16 +121,13 @@ def make_grids(size, num_scales, num_angles, scaled_sizes=None):
         rotation_matrices = []
         for angle in range(num_angles):
             theta = angle * np.pi / num_angles
-            shift_correction_x = -(np.cos(-theta) - np.sin(-theta)) / scaled_size
-            shift_correction_y = -(np.cos(-theta) + np.sin(-theta)) / scaled_size
-
-            rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), shift_correction_x],
-                                    [-np.sin(theta), np.cos(theta), shift_correction_y]], dtype=torch.float)
+            rot_mat = torch.tensor([[np.cos(theta), np.sin(theta), 0],
+                                    [-np.sin(theta), np.cos(theta), 0]], dtype=torch.float)
             rotation_matrices.append(rot_mat)
         rotation_matrices = torch.stack(rotation_matrices)
 
         grids = torch.nn.functional.affine_grid(rotation_matrices,
-                                                [num_angles, 1, scaled_size, scaled_size],
+                                                [num_angles, 1, scaled_size + 1, scaled_size + 1],
                                                 align_corners=True)
         affine_grids.append(grids)
 
@@ -138,10 +135,10 @@ def make_grids(size, num_scales, num_angles, scaled_sizes=None):
 
 
 def pad_filters(x, full_size, scaled_size):
-    if full_size == scaled_size:
+    if full_size == scaled_size - 1:
         return x
     pad_factor = (full_size - scaled_size) // 2
-    padded = pad(x, (pad_factor, pad_factor, pad_factor, pad_factor))  # +1 for the nyq
+    padded = pad(x, (pad_factor, pad_factor - 1, pad_factor, pad_factor - 1))  # +1 for the nyq
     return padded
 
 
@@ -149,10 +146,19 @@ def make_duplicate_rotations(x):
     return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
 
+def crop_extra_nyquist(x):
+    # the rotations work by rotating about the centre then cropping out the bottom and right 'extra' freqs
+    # this retains the nyquist (which is in the topmost row and leftmost column) and allows us to use
+    # the rot90 above to save calcs.
+    return x[:, :-1, :-1]
+
+
 def make_filters(grids, num_scales, full_size, filter_func, scaled_sizes):
     filters = []
     for scale in range(num_scales):
-        fully_rotated_filters = filter_func(grids, scale)
+        half_rotated_filters = filter_func(grids, scale)
+        fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
+        nyquist_cropped_filters = crop_extra_nyquist(fully_rotated_filters)
         padded_filters = pad_filters(fully_rotated_filters, full_size, scaled_sizes[scale])
         filters.append(padded_filters)
     return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
@@ -165,12 +171,16 @@ class GridFuncFilter(FilterBank):
         if num_angles % 2 != 0:
             raise ValueError("num_angles must be even. This allows a significant speedup.")
 
-        self.scaled_sizes = scaled_sizes
+        if scaled_sizes is None:
+            self.scaled_sizes = [size // 2 ** j for j in range(num_scales)]
+        else:
+            self.scaled_sizes = scaled_sizes
         self.grids = make_grids(size, num_scales, num_angles, self.scaled_sizes)
         self.filter_tensor = None
 
     def update_filters(self):
-        self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function, self.scaled_sizes)
+        self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function,
+                                          self.scaled_sizes)
 
     def filter_function(self, grid, scale):
         # takes in grid and scale and returns a filter
@@ -215,7 +225,7 @@ class LowPass(GridFuncFilter):
 class FourierSubNetFilters(GridFuncFilter):
 
     def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=True,
-                 symmetric=True, periodic=True, scaled_sizes=None):
+                 symmetric=True, periodic=False, scaled_sizes=None):
         super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles, scaled_sizes=scaled_sizes)
         if subnet is None:
             if scale_invariant:
@@ -267,6 +277,7 @@ class FourierSubNetFilters(GridFuncFilter):
             optimiser.step()
             optimiser.zero_grad()
             self.update_filters()
+
 
 
 class TrainableMorlet(GridFuncFilter):
