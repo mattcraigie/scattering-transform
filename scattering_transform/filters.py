@@ -2,16 +2,44 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import interpolate, pad, grid_sample, affine_grid, avg_pool2d, avg_pool1d
 import numpy as np
-from scattering_transform.wavelet_functions import create_bank, morlet_wavelet, skew_wavelet
+from .wavelet_functions import create_bank, morlet_wavelet, skew_wavelet
+from .general_functions import clip_fourier_field
+
+
+def dyadic_clip_sizes(scale: int, start_size: int):
+    """
+    The default clip size, halving with each increase in scale.
+    :param scale: The wavelet scale factor (often denoted j)
+    :param start_size: The size of the initial field
+    :return:
+    """
+    return int(start_size * 2 ** (-scale))
+
+
+def morlet_clip_sizes(scale: int, start_size: int):
+    """
+    The clip size that works with Morlet wavelets. This comes from the unusual specification, borrowed from kymatio.
+    :param scale: The wavelet scale factor (often denoted j)
+    :param start_size: The size of the initial field
+    :return:
+    """
+    return min(max(int(start_size * 2 ** (-scale + 1)), 32), start_size)
 
 
 class FilterBank(nn.Module):
-    def __init__(self, size, num_scales, num_angles):
+    def __init__(self, size: int, num_scales: int, num_angles: int, clip_sizes: list = None):
         super(FilterBank, self).__init__()
         self.size = size
         self.num_scales = num_scales
         self.num_angles = num_angles
         self.device = None
+        self.clip_sizes = clip_sizes
+        self.filters = None
+
+    def clip_filters(self):
+        assert getattr(self, "filter_tensor", None) is not None, "Must specify filter tensor before calling " \
+                                                                 "clip_filters method"
+        self.filters = [clip_fourier_field(self.filter_tensor[j], self.clip_sizes[j]) for j in range(self.num_scales)]
 
     def to(self, device):
         super(FilterBank, self).to(device)
@@ -19,11 +47,20 @@ class FilterBank(nn.Module):
 
 
 class FixedFilterBank(FilterBank):
-    def __init__(self, filter_tensor: torch.Tensor):
-        assert len(filter_tensor.shape) == 4
+    def __init__(self, filter_tensor: torch.Tensor, clip_sizes: list = None):
+        dims = len(filter_tensor.shape)
+        assert dims == 4 or dims == 5
         self.filter_tensor = filter_tensor
-        num_scales, num_angles, size, _ = self.filter_tensor.shape
-        super(FixedFilterBank, self).__init__(size, num_scales, num_angles)
+
+        num_scales, num_angles, =  filter_tensor.shape[0],  filter_tensor.shape[1]
+        size = filter_tensor.shape[-1]
+
+        if clip_sizes is None:
+            clip_sizes = [dyadic_clip_sizes(j, size) for j in range(num_scales)]
+        else:
+            assert len(clip_sizes) == num_scales, "clip_sizes must be the same length as the number of scales"
+
+        super(FixedFilterBank, self).__init__(size, num_scales, num_angles, clip_sizes)
 
     def to(self, device):
         super(FixedFilterBank, self).to(device)
@@ -33,7 +70,8 @@ class FixedFilterBank(FilterBank):
 class Morlet(FixedFilterBank):
     def __init__(self, size, num_scales, num_angles):
         filter_tensor = create_bank(size, num_scales, num_angles, morlet_wavelet)
-        super(Morlet, self).__init__(filter_tensor)
+        super(Morlet, self).__init__(filter_tensor, clip_sizes=[morlet_clip_sizes(j, size) for j in range(num_scales)])
+        self.clip_filters()
 
 
 class ClippedMorlet(Morlet):
@@ -109,14 +147,11 @@ def scale2size(full_size, scale):
     return result
 
 
-def make_grids(size, num_scales, num_angles, scaled_sizes=None):
+def make_grids(size, num_scales, num_angles, clip_sizes):
     affine_grids = []
     for scale in range(num_scales):
 
-        if scaled_sizes is None:
-            scaled_size = scale2size(size, scale)
-        else:
-            scaled_size = scaled_sizes[scale]
+        scaled_size = clip_sizes[scale]
 
         rotation_matrices = []
         for angle in range(num_angles // 2):
@@ -153,34 +188,35 @@ def crop_extra_nyquist(x):
     return x[:, :-1, :-1]
 
 
-def make_filters(grids, num_scales, full_size, filter_func, scaled_sizes):
+def make_filters(grids, num_scales, full_size, filter_func, clip_sizes):
     filters = []
     for scale in range(num_scales):
         half_rotated_filters = filter_func(grids, scale)
         fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
         nyquist_cropped_filters = crop_extra_nyquist(fully_rotated_filters)
-        padded_filters = pad_filters(nyquist_cropped_filters, full_size, scaled_sizes[scale])
+        padded_filters = pad_filters(nyquist_cropped_filters, full_size, clip_sizes[scale])
         filters.append(padded_filters)
     return torch.fft.fftshift(torch.stack(filters), dim=(-2, -1))
 
 
 class GridFuncFilter(FilterBank):
-    def __init__(self, size, num_scales, num_angles, scaled_sizes=None):
+    def __init__(self, size, num_scales, num_angles, clip_sizes=None):
         super(GridFuncFilter, self).__init__(size, num_scales, num_angles)
 
         if num_angles % 2 != 0:
             raise ValueError("num_angles must be even. This allows a significant speedup.")
 
-        if scaled_sizes is None:
-            self.scaled_sizes = [size // 2 ** j for j in range(num_scales)]
+        if clip_sizes is None:
+            self.clip_sizes = [dyadic_clip_sizes(scale, size) for scale in range(num_scales)]
         else:
-            self.scaled_sizes = scaled_sizes
-        self.grids = make_grids(size, num_scales, num_angles, self.scaled_sizes)
+            self.clip_sizes = clip_sizes
+        self.grids = make_grids(size, num_scales, num_angles, self.clip_sizes)
         self.filter_tensor = None
 
     def update_filters(self):
         self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function,
-                                          self.scaled_sizes)
+                                          self.clip_sizes)
+        self.clip_filters()
 
     def filter_function(self, grid, scale):
         # takes in grid and scale and returns a filter
@@ -191,7 +227,6 @@ class GridFuncFilter(FilterBank):
         super(GridFuncFilter, self).to(device)
         self.grids = [g.to(device) for g in self.grids]
         self.filter_tensor = self.filter_tensor.to(device)
-
 
 
 class BandPass(GridFuncFilter):
@@ -225,8 +260,9 @@ class LowPass(GridFuncFilter):
 class FourierSubNetFilters(GridFuncFilter):
 
     def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=True,
-                 symmetric=True, periodic=False, scaled_sizes=None):
-        super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles, scaled_sizes=scaled_sizes)
+                 symmetric=True, periodic=False, clip_sizes=None):
+        super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles, clip_sizes=clip_sizes)
+
         if subnet is None:
             if scale_invariant:
                 self.subnet = SubNet()
@@ -239,7 +275,6 @@ class FourierSubNetFilters(GridFuncFilter):
         self.periodic = periodic
 
         self.net_ins = []
-
         self.update_filters()
 
         if init_morlet:
@@ -366,11 +401,11 @@ class FourierDirectFilters(FilterBank):
             morlet_filters = morlet.filter_tensor[1:, num_angles // 2 - 1]
 
 
-        self.scaled_sizes = []
+        self.clip_sizes = []
         raw_filters = []
         for scale in range(self.num_scales):
             scaled_size = self.scale2size(scale)
-            self.scaled_sizes.append(scaled_size)
+            self.clip_sizes.append(scaled_size)
 
             if init_morlet:
                 raw = morlet_filters[scale][:scaled_size - 1, :scaled_size // 2].flip(1)
@@ -403,7 +438,7 @@ class FourierDirectFilters(FilterBank):
             affine_grids.append(
                 affine_grid(
                     rotation_matrices,
-                    [self.num_angles // 2, 1, self.scaled_sizes[scale] - 1, self.scaled_sizes[scale] - 1],
+                    [self.num_angles // 2, 1, self.clip_sizes[scale] - 1, self.clip_sizes[scale] - 1],
                     align_corners=True)
             )
 
@@ -421,12 +456,12 @@ class FourierDirectFilters(FilterBank):
 
     def _rotate_filter(self, x, scale):
         grid = self.rotation_grids[scale]
-        x = grid_sample(x[None, None, :, :].repeat(self.num_angles // 2, 1, self.scaled_sizes[scale] - 1,
-                                                   self.scaled_sizes[scale] - 1), grid).squeeze(1)
+        x = grid_sample(x[None, None, :, :].repeat(self.num_angles // 2, 1, self.clip_sizes[scale] - 1,
+                                                   self.clip_sizes[scale] - 1), grid).squeeze(1)
         return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
     def _pad_filters(self, x, scale):
-        pad_factor = (self.size - self.scaled_sizes[scale]) // 2
+        pad_factor = (self.size - self.clip_sizes[scale]) // 2
         padded = pad(x, (pad_factor + 1, pad_factor, pad_factor + 1, pad_factor))  # +1 for the nyq
         return padded
 
@@ -444,3 +479,4 @@ class FourierDirectFilters(FilterBank):
         self.filter_tensor = self.filter_tensor.to(device)
         for j in range(self.num_scales):
             self.rotation_grids[j] = self.rotation_grids[j].to(device)
+

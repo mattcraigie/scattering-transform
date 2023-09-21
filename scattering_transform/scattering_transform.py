@@ -1,7 +1,7 @@
-import numpy as np
 import torch
-from torch.fft import fft2, ifft2
-from scattering_transform.filters import FilterBank
+from torch.fft import fft2, ifft2, fftn, ifftn
+from .filters import FilterBank
+from .general_functions import clip_fourier_field
 
 
 def scattering_operation(input_a: torch.Tensor, input_b: torch.Tensor) -> torch.Tensor:
@@ -14,76 +14,6 @@ def scattering_operation(input_a: torch.Tensor, input_b: torch.Tensor) -> torch.
     return ifft2(input_a * input_b).abs()
 
 
-def cross_scattering_operation(input_a: torch.Tensor, input_b: torch.Tensor, common: torch.Tensor) -> torch.Tensor:
-    return torch.sqrt(scattering_operation(input_a, common) * scattering_operation(input_b, common))
-
-
-def clip_fourier_field(field: torch.Tensor, final_size: int) -> torch.Tensor:
-    """
-    Performs a high frequency clip on a 2D field in Fourier space for a filter scale J.
-    :param field: The input field.
-    :param final_size: The final size
-    :return: the field after clipping
-    """
-    assert final_size <= field.shape[-1], "Final size must be smaller than or same as the input field size"
-    cl = final_size // 2
-    result = torch.cat((torch.cat((field[..., :cl, :cl], field[..., -cl:, :cl]), -2),
-                        torch.cat((field[..., :cl, -cl:], field[..., -cl:, -cl:]), -2)
-                        ), -1)
-    return result
-
-
-def scale_to_clip_size(scale: int, start_size: int):
-    """
-    Returns the default clip size that is used to speed up the scattering transform. Works with the Morlet wavelets.
-    :param scale: The wavelet scale factor (often denoted j)
-    :param start_size: The size of the initial field
-    :return:
-    """
-    return min(max(int(start_size * 2 ** (-scale + 1)), 32), start_size)
-
-
-# legacy function, class use is preferred
-def reduce_coefficients(s0, s1, s2, reduction='rot_avg', normalise_s1=False, normalise_s2=False):
-
-    assert reduction in [None, 'rot_avg', 'ang_avg'], \
-        "Wrong output type: must be one of [None, 'rot_avg', 'ang_avg']"
-
-    # Normalisation
-    if normalise_s2:
-        s2 = s2 / s1[:, :, :, None, None]
-
-    if normalise_s1:
-        s1 = s1 / s0[:, :, None]
-
-    # Reduction by averaging
-    scale_idx = torch.triu_indices(s1.shape[1], s1.shape[1], offset=1)
-    s2 = s2[:, scale_idx[0], :, scale_idx[1]].swapaxes(0, 1)
-
-    if reduction is None:
-        s1 = s1.flatten(1, 2)
-        s2 = s2.flatten(1, 3)
-
-    elif reduction == 'rot_avg':
-        s1 = s1.mean(-1)
-        s2 = s2.mean(dim=(-2, -1))
-
-    elif reduction == 'ang_avg':
-        s1 = s1.mean(-1)
-        num_angles = s2.shape[-1]
-        d = torch.abs(torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :])
-        angle_bins = torch.min(num_angles - d, d)
-        num_bins = torch.unique(angle_bins).shape[0]
-        print(s2.shape)
-        s2_vals = torch.zeros((s2.shape[0], s2.shape[1], num_bins), device=s2.device)
-        for i in range(num_bins):
-            idx = torch.where(angle_bins == i)
-            print(s2_vals[:, :, i].shape)
-            print(s2[:, :, idx[0], idx[1]].mean(-1).shape)
-            s2_vals[:, :, i] = s2[:, :, idx[0], idx[1]].mean(-1)
-        s2 = s2_vals.flatten(1, 2)
-
-    return torch.cat((s0, s1, s2), dim=1)
 
 
 class Reducer(torch.nn.Module):
@@ -117,7 +47,7 @@ class Reducer(torch.nn.Module):
         self.normalise_s2 = normalise_s2
 
         # run a test field through the scattering transform to work out the required number of outputs
-        test_field = torch.randn(1, filters.size, filters.size).to(filters.device)
+        test_field = torch.randn(1, 1, filters.size, filters.size).to(filters.device)
         st = ScatteringTransform2d(filters)
         st.to(filters.device)
         s = st.forward(test_field)
@@ -187,115 +117,117 @@ class Reducer(torch.nn.Module):
 
 
 class ScatteringTransform2d(torch.nn.Module):
-
-    # todo: change the code to take in cross_dim on the forward pass and have the option to cross between channels in
-    #       that dim
-
-    def __init__(self, filters: FilterBank, clip_sizes=None):
+    def __init__(self, filter_bank: FilterBank):
         super(ScatteringTransform2d, self).__init__()
-        self.filters = filters
-        self.device = torch.device('cpu')
 
-        # We gain a significant speedup by clipping the filters to only the relevant fourier modes
-        if clip_sizes is None:
-            self.clip_sizes = []
-            for j in range(self.filters.num_scales):
-                clip_size = scale_to_clip_size(j, self.filters.size)
-                self.clip_sizes.append(clip_size)
-        else:
-            assert len(clip_sizes) == filters.num_scales, "Clip sizes must match the number of scales"
-            self.clip_sizes = clip_sizes
+        # check the filter bank has been correctly specified
+        assert getattr(filter_bank, "clip_sizes", None) is not None, "Clip sizes must be specified for the filter bank"
+        assert getattr(filter_bank, "filters", None) is not None, "Filters must be specified for the filter bank"
+        self.filter_bank = filter_bank
 
-        # Storing the clip scaling factors, since we must use these to correctly scale the scattering fields.
-        self.clip_scaling_factors = []
-        for j in range(self.filters.num_scales):
-            self.clip_scaling_factors.append(self.clip_sizes[j] ** 2 / self.filters.size ** 2)
+        # add the clip scaling factors - these account for the effects of clipping on the scattering coefficients
+        self.clip_scaling_factors = [self.filter_bank.clip_sizes[j] ** 2 / self.filter_bank.size ** 2
+                                     for j in range(self.filter_bank.num_scales)]
         self.clip_scaling_factors = torch.tensor(self.clip_scaling_factors)
 
-        # Clip the filters to speed up calculations
-        self.clip_filters()
+    def scattering_transform(self, fields):
+        # fields should be a tensor of shape (batch, channels, size, size)
+        assert len(fields.shape) == 4, "The input fields should have shape (batch, channels, size, size)"
 
-    def to(self, device):
-        self.device = device
-        self.filters.to(device)
-        for j in range(self.filters.num_scales):
-            self.filters_clipped[j] = self.filters_clipped[j].to(device)
-        self.clip_scaling_factors = self.clip_scaling_factors.to(device)
-
-    def clip_filters(self):
-        self.filters_clipped = []
-        for j in range(self.filters.num_scales):
-            self.filters_clipped.append(
-                clip_fourier_field(self.filters.filter_tensor[j], self.clip_sizes[j])
-            )
-
-    def scattering_transform(self, fields, pre_fft=False):
-        if len(fields.shape) < 3:
-            raise ValueError("The input fields should have shape (batch, (...,) size, size)")
-
-        batch_sizes = fields.shape[:fields.ndim-2]
-
-        if pre_fft:
-            fields_k = fields
-        else:
-            fields_k = fft2(fields)
-
+        # the zeroth order coefficient
         coeffs_0 = torch.mean(fields, dim=(-2, -1)).unsqueeze(-1)
-        coeffs_1, outputs_1 = self._first_order(scattering_operation, [fields_k, ], batch_sizes)
+        coeffs_1, fields_1 = self._first_order(fields)
+        coeffs_2 = self._second_order(fields_1)
 
-        inputs_2 = [fft2(i) for i in outputs_1]
-        coeffs_2 = self._second_order(scattering_operation, [inputs_2, ], batch_sizes)
+        # rescale the coefficients to account for clipping
+        coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2)
 
-        coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2, len(batch_sizes))
         return coeffs_0, coeffs_1, coeffs_2
 
-    def _first_order(self, func, input_fields, batch_sizes):
-        all_output = []
-        coeffs = torch.zeros(batch_sizes + (self.filters.num_scales, self.filters.num_angles),
-                             device=input_fields[0].device)  # should I replace with cat/stack?
-        for scale in range(self.filters.num_scales):
-            in_fields = [clip_fourier_field(a, self.clip_sizes[scale])[..., None, :, :] for a in input_fields]
-            output = func(*in_fields, self.filters_clipped[scale][[None]*len(batch_sizes)+[Ellipsis]])
-            coeffs[[slice(None)]*len(batch_sizes)+[scale]] = output.mean((-2, -1))
-            all_output.append(output)
+    def _first_order(self, fields):
 
-        return coeffs, all_output
+        fields_fourier = fft2(fields)
 
-    def _second_order(self, func, input_fields, batch_sizes):
+        first_order_coefficients = []
+        first_order_scattering_fields = []
+        for scale in range(self.filter_bank.num_scales):
 
-        coeffs = torch.zeros(batch_sizes + (self.filters.num_scales, self.filters.num_angles,
-                              self.filters.num_scales, self.filters.num_angles), device=input_fields[0][0].device)
+            # clip the fields to the correct size
+            clip_size = self.filter_bank.clip_sizes[scale]
+            fields_fourier_clipped = clip_fourier_field(fields_fourier, clip_size)
 
-        for scale_1 in range(self.filters.num_scales):
-            for scale_2 in range(self.filters.num_scales):
+            # get the filter for this scale
+            scale_filter = self.filter_bank.filters[scale]
+
+            # add broadcasting dimensions
+            fields_fourier_clipped = fields_fourier_clipped[:, :, None, ...]
+            scale_filter = scale_filter[None, None, ...]
+
+            # apply the scattering operation
+            scattering_fields = scattering_operation(fields_fourier_clipped, scale_filter)
+            first_order_scattering_fields.append(scattering_fields)
+
+            # compute the mean of the scattering fields to get the first order coefficients
+            coefficients = scattering_fields.mean((-2, -1))
+            first_order_coefficients.append(coefficients)
+
+        # stack the coefficients along the scale dimension
+        first_order_coefficients = torch.stack(first_order_coefficients, dim=2)  # shape (batch, channels, scales, angles)
+        return first_order_coefficients, first_order_scattering_fields
+
+    def _second_order(self, field_list):
+
+        second_order_coefficients = []
+        for scale_1 in range(self.filter_bank.num_scales):
+            for scale_2 in range(self.filter_bank.num_scales):
                 if scale_2 > scale_1:
-                    in_fields = [clip_fourier_field(a[scale_1], self.clip_sizes[scale_2])[..., None, :, :] for a in
-                                 input_fields]
-                    output_2 = func(*in_fields, self.filters_clipped[scale_2][[None]*(len(batch_sizes)+1)+[Ellipsis]])
-                    coeffs[[slice(None)]*len(batch_sizes)+[scale_1, slice(None), scale_2, slice(None)]] = output_2.mean((-2, -1))
 
-        return coeffs
+                    fields_fourier = fft2(field_list[scale_1])
 
-    # def cross_scattering_transform(self, fields_a, fields_b):
-    #     fields_a_k = fft2(fields_a)
-    #     fields_b_k = fft2(fields_b)
-    #
-    #     coeffs_0 = torch.mean(fields_a.sqrt() * fields_b.sqrt(), dim=(-2, -1)).unsqueeze(1)  # maybe?
-    #     coeffs_1, outputs_1 = self._first_order(cross_scattering_operation, [fields_a_k, fields_b_k, ])
-    #
-    #     inputs_2 = [fft2(i) for i in outputs_1]
-    #     coeffs_2 = self._second_order(scattering_operation, [inputs_2, ])
-    #
-    #     coeffs_1, coeffs_2 = self._rescale_coeffs(coeffs_1, coeffs_2)
-    #     return coeffs_0, coeffs_1, coeffs_2
+                    # clip the fields to the correct size
+                    clip_size = self.filter_bank.clip_sizes[scale_2]
+                    fields_fourier_clipped = clip_fourier_field(fields_fourier, clip_size)
 
-    def _rescale_coeffs(self, c1, c2, batch_dim):
-        c1 = c1 * self.clip_scaling_factors[[None] * batch_dim + [slice(None), None]]
-        c2 = c2 * self.clip_scaling_factors[[None] * batch_dim + [None, None, slice(None), None]]
+                    # get the filter for this scale
+                    scale_filter = self.filter_bank.filters[scale_2]
+
+                    # add broadcasting dimensions
+                    fields_fourier_clipped = fields_fourier_clipped[..., None, :, :]
+                    scale_filter = scale_filter[None, None, None, ...]
+
+                    # apply the scattering operation to the first order fields
+                    scattering_fields = scattering_operation(fields_fourier_clipped, scale_filter)
+
+                    # compute the mean of the scattering fields to get the second order coefficients
+                    coefficients = scattering_fields.mean((-2, -1))
+                    second_order_coefficients.append(coefficients)
+                else:
+                    # if scale_2 < scale_1 there is no useful information, do not compute and set to zero
+                    second_order_coefficients.append(
+                        torch.zeros(field_list[0].shape[:2] + (self.filter_bank.num_angles, self.filter_bank.num_angles)
+                                    ))
+
+        # arrange the coefficients into a single tensor of shape (batch, channels, scale 1, scale 2, angle 1, angle 2)
+        b, c, l1, l2 = second_order_coefficients[0].shape
+        j1 = j2 = self.filter_bank.num_scales
+        second_order_coefficients = torch.stack(second_order_coefficients, dim=-1)
+        second_order_coefficients = second_order_coefficients.reshape(b, c, l1, l2, j1, j2)
+        second_order_coefficients = second_order_coefficients.permute(0, 1, 4, 2, 5, 3)
+
+        return second_order_coefficients
+
+    def _rescale_coeffs(self, c1, c2):
+
+        c1 = c1 * self.clip_scaling_factors[None, None, :, None]
+        c2 = c2 * self.clip_scaling_factors[None, None, None, None, :, None]
+
         return c1, c2
 
-    def forward(self, fields, pre_fft=False, cross_dim=None):
-        if cross_dim is None:
-            return self.scattering_transform(fields, pre_fft=pre_fft)
-        else:
-            raise NotImplementedError("Cross scattering not implemented yet")
+    def forward(self, fields):
+        return self.scattering_transform(fields)
+
+    def to(self, device):
+        super(ScatteringTransform2d, self).to(device)
+        self.filter_bank.to(device)
+        self.clip_scaling_factors = self.clip_scaling_factors.to(device)
+        return self
