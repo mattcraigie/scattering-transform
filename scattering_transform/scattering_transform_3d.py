@@ -1,11 +1,12 @@
 import torch
 from torch.fft import fft2
-from .filters import FilterBank
-from .general_functions import clip_fourier_field, clip_fourier_field_3d, scattering_operation
+from .filters_3d import FilterBank3d
+from .general_functions import clip_fourier_field_3d, scattering_operation
+from .scattering_transform import ScatteringTransform2d
 
 
-class ScatteringTransform2d(torch.nn.Module):
-    def __init__(self, filter_bank: FilterBank):
+class ScatteringTransform3d(ScatteringTransform2d):
+    def __init__(self, filter_bank: FilterBank3d):
         """
         A class to compute the scattering transform of a 2D field, for a given set of filters stored in a FilterBank
         class.
@@ -13,29 +14,24 @@ class ScatteringTransform2d(torch.nn.Module):
         :param filter_bank: The filter bank to use for the scattering transform.
         """
 
-        super(ScatteringTransform2d, self).__init__()
+        super(ScatteringTransform3d, self).__init__(filter_bank)
 
-        # check the filter bank has been correctly specified
-        assert getattr(filter_bank, "clip_sizes", None) is not None, "Clip sizes must be specified for the filter bank"
-        assert getattr(filter_bank, "filters", None) is not None, "Filters must be specified for the filter bank"
-        self.filter_bank = filter_bank
-
-        # add the clip scaling factors - these account for the effects of clipping on the scattering coefficients
-        self.clip_scaling_factors = [self.filter_bank.clip_sizes[j] ** 2 / self.filter_bank.size ** 2
+        # add the clip scaling factors - adjusted for 3D
+        self.clip_scaling_factors = [self.filter_bank.clip_sizes[j] ** 3 / self.filter_bank.size ** 3
                                      for j in range(self.filter_bank.num_scales)]
         self.clip_scaling_factors = torch.tensor(self.clip_scaling_factors)
 
     def _scattering_transform(self, fields):
         """
         Computes the scattering transform of a batch of 2D fields. Use the forward method of the class to call.
-        :param fields: A tensor of shape (batch, channels, size, size) containing the fields to transform.
+        :param fields: A tensor of shape (batch, channels, size, size, size) containing the fields to transform.
         :return: A tuple containing the zeroth, first and second order scattering coefficients.
         """
 
-        assert len(fields.shape) == 4, "The input fields should have shape (batch, channels, size, size)"
+        assert len(fields.shape) == 5, "The input fields should have shape (batch, channels, size, size, size)"
 
         # the zeroth order coefficient
-        coeffs_0 = torch.mean(fields, dim=(-2, -1)).unsqueeze(-1)
+        coeffs_0 = torch.mean(fields, dim=(-3, -2, -1)).unsqueeze(-1)
         coeffs_1, fields_1 = self._first_order(fields)
         coeffs_2 = self._second_order(fields_1)
 
@@ -59,7 +55,7 @@ class ScatteringTransform2d(torch.nn.Module):
 
             # clip the fields to the correct size
             clip_size = self.filter_bank.clip_sizes[scale]
-            fields_fourier_clipped = clip_fourier_field(fields_fourier, clip_size)
+            fields_fourier_clipped = clip_fourier_field_3d(fields_fourier, clip_size)
 
             # get the filter for this scale
             scale_filter = self.filter_bank.filters[scale]
@@ -73,7 +69,7 @@ class ScatteringTransform2d(torch.nn.Module):
             first_order_scattering_fields.append(scattering_fields)
 
             # compute the mean of the scattering fields to get the first order coefficients
-            coefficients = scattering_fields.mean((-2, -1))
+            coefficients = scattering_fields.mean((-3, -2, -1))
             first_order_coefficients.append(coefficients)
 
         # stack the coefficients along the scale dimension
@@ -95,7 +91,7 @@ class ScatteringTransform2d(torch.nn.Module):
 
                     # clip the fields to the correct size
                     clip_size = self.filter_bank.clip_sizes[scale_2]
-                    fields_fourier_clipped = clip_fourier_field(fields_fourier, clip_size)
+                    fields_fourier_clipped = clip_fourier_field_3d(fields_fourier, clip_size)
 
                     # get the filter for this scale
                     scale_filter = self.filter_bank.filters[scale_2]
@@ -108,7 +104,7 @@ class ScatteringTransform2d(torch.nn.Module):
                     scattering_fields = scattering_operation(fields_fourier_clipped, scale_filter)
 
                     # compute the mean of the scattering fields to get the second order coefficients
-                    coefficients = scattering_fields.mean((-2, -1))
+                    coefficients = scattering_fields.mean((-3, -2, -1))
                     second_order_coefficients.append(coefficients)
                 else:
                     # if scale_2 < scale_1 there is no useful information, do not compute and set to zero
@@ -124,36 +120,3 @@ class ScatteringTransform2d(torch.nn.Module):
         second_order_coefficients = second_order_coefficients.permute(0, 1, 4, 2, 5, 3)
 
         return second_order_coefficients
-
-    def _rescale_coeffs(self, c1, c2):
-        """
-        Rescales the scattering coefficients to account for the effects of clipping.
-        :param c1: the first order scattering coefficients
-        :param c2: the second order scattering coefficients
-        :return: a tuple containing the rescaled coefficients
-        """
-
-        c1 = c1 * self.clip_scaling_factors[None, None, :, None]
-        c2 = c2 * self.clip_scaling_factors[None, None, None, None, :, None]
-
-        return c1, c2
-
-    def forward(self, fields):
-        """
-        The forward pass of the scattering transform.
-        :param fields: A tensor of shape (batch, channels, size, size) containing the fields to transform.
-        :return: A tuple containing the zeroth, first and second order scattering coefficients.
-        """
-        return self._scattering_transform(fields)
-
-    def to(self, device):
-        """
-        Moves the scattering transform to the specified device.
-        :param device: the device to move to
-        :return: self
-        """
-        super(ScatteringTransform2d, self).to(device)
-        self.filter_bank.to(device)
-        self.clip_scaling_factors = self.clip_scaling_factors.to(device)
-        return self
-

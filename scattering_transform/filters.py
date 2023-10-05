@@ -3,27 +3,7 @@ import torch.nn as nn
 from torch.nn.functional import interpolate, pad, grid_sample, affine_grid, avg_pool2d, avg_pool1d
 import numpy as np
 from .wavelet_functions import create_bank, morlet_wavelet, skew_wavelet
-from .general_functions import clip_fourier_field
-
-
-def dyadic_clip_sizes(scale: int, start_size: int):
-    """
-    The default clip size, halving with each increase in scale.
-    :param scale: The wavelet scale factor (often denoted j)
-    :param start_size: The size of the initial field
-    :return:
-    """
-    return int(start_size * 2 ** (-scale))
-
-
-def morlet_clip_sizes(scale: int, start_size: int):
-    """
-    The clip size that works with Morlet wavelets. This comes from the unusual specification, borrowed from kymatio.
-    :param scale: The wavelet scale factor (often denoted j)
-    :param start_size: The size of the initial field
-    :return:
-    """
-    return min(max(int(start_size * 2 ** (-scale + 1)), 32), start_size)
+from .general_functions import clip_fourier_field, dyadic_clip_sizes, morlet_clip_sizes
 
 
 class FilterBank(nn.Module):
