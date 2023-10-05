@@ -110,7 +110,7 @@ class ScatteringTransform3d(ScatteringTransform2d):
                     # if scale_2 < scale_1 there is no useful information, do not compute and set to zero
                     second_order_coefficients.append(
                         torch.zeros(field_list[0].shape[:2] + (self.filter_bank.num_angles, self.filter_bank.num_angles)
-                                    ))
+                                    ).to(self.device))
 
         # arrange the coefficients into a single tensor of shape (batch, channels, scale 1, scale 2, angle 1, angle 2)
         b, c, l1, l2 = second_order_coefficients[0].shape

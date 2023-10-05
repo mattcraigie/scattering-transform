@@ -19,6 +19,7 @@ class ScatteringTransform2d(torch.nn.Module):
         assert getattr(filter_bank, "clip_sizes", None) is not None, "Clip sizes must be specified for the filter bank"
         assert getattr(filter_bank, "filters", None) is not None, "Filters must be specified for the filter bank"
         self.filter_bank = filter_bank
+        self.device = torch.device('cpu')
 
         # add the clip scaling factors - these account for the effects of clipping on the scattering coefficients
         self.clip_scaling_factors = [self.filter_bank.clip_sizes[j] ** 2 / self.filter_bank.size ** 2
@@ -114,7 +115,7 @@ class ScatteringTransform2d(torch.nn.Module):
                     # if scale_2 < scale_1 there is no useful information, do not compute and set to zero
                     second_order_coefficients.append(
                         torch.zeros(field_list[0].shape[:2] + (self.filter_bank.num_angles, self.filter_bank.num_angles)
-                                    ))
+                                    ).to(self.device))
 
         # arrange the coefficients into a single tensor of shape (batch, channels, scale 1, scale 2, angle 1, angle 2)
         b, c, l1, l2 = second_order_coefficients[0].shape
@@ -155,5 +156,6 @@ class ScatteringTransform2d(torch.nn.Module):
         super(ScatteringTransform2d, self).to(device)
         self.filter_bank.to(device)
         self.clip_scaling_factors = self.clip_scaling_factors.to(device)
+        self.device = device
         return self
 
