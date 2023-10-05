@@ -207,6 +207,8 @@ class FourierSubNetFilters3d(GridFuncFilter):
 
         if subnet is None:
             self.subnet = SubNet3d(num_ins=4, hidden_sizes=(64, 64))
+        else:
+            self.subnet = subnet
 
         self.symmetric = symmetric
 
