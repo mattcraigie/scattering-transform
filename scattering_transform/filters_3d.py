@@ -199,11 +199,11 @@ class SubNet3d(nn.Module):
         return x.reshape(b, s, s, s)
 
 
-class FourierSubNetFilters(GridFuncFilter):
+class FourierSubNetFilters3d(GridFuncFilter):
 
     def __init__(self, size, num_scales, num_angles, subnet=None,
                  symmetric=True, clip_sizes=None):
-        super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles, clip_sizes=clip_sizes)
+        super(FourierSubNetFilters3d, self).__init__(size, num_scales, num_angles, clip_sizes=clip_sizes)
 
         if subnet is None:
             self.subnet = SubNet3d(num_ins=4, hidden_sizes=(64, 64))
@@ -230,7 +230,7 @@ class FourierSubNetFilters(GridFuncFilter):
         return filters
 
     def to(self, device):
-        super(FourierSubNetFilters, self).to(device)
+        super(FourierSubNetFilters3d, self).to(device)
         self.subnet.to(device)
 
 
