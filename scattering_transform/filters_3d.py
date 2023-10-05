@@ -51,6 +51,7 @@ class FilterBank3d(nn.Module):
 
     def to(self, device):
         super(FilterBank3d, self).to(device)
+        self.filters = [filt.to(device) for filt in self.filters]
         self.device = device
 
 
