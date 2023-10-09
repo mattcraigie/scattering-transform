@@ -76,35 +76,6 @@ class FixedFilterBank3d(FilterBank3d):
         self.filter_tensor = self.filter_tensor.to(device)
 
 
-class Morlet3d(FixedFilterBank3d):
-    def __init__(self, size, num_scales, num_angles):
-        filter_tensor = create_bank(size, num_scales, num_angles, morlet_wavelet)
-        filter_tensor = torch.stack([filter_tensor for _ in range(size)], dim=-1)
-
-        # multiply by a gaussian packet along the last dimension.
-        # the gaussian packet is centred at the origin and has a standard deviation of 1/8 the size of the filter
-        filter_tensor = torch.fft.fftshift(filter_tensor, dim=(-1, -2, -3))
-
-        # create a grid of points in the last dimension
-        x = torch.linspace(-size/2, size/2, size)
-        x = x.view(1, 1, 1, 1, -1)
-        x = x.repeat(num_scales, num_angles, size, size, 1)
-
-        # create the gaussian packet
-        # this needs to be fixed so that the packet modulation is different for each scale, but it gets the point across
-        sigma = size/8
-        gaussian = torch.exp(-x**2 / (2*sigma**2))
-
-        # multiply the filter tensor by the gaussian packet
-        filter_tensor = filter_tensor * gaussian
-
-        # shift back
-        filter_tensor = torch.fft.ifftshift(filter_tensor, dim=(-1, -2, -3))
-
-        super(Morlet3d, self).__init__(filter_tensor, clip_sizes=[morlet_clip_sizes(j, size) for j in range(num_scales)])
-        self.clip_filters()
-
-
 def make_grids_3d(sizes, num_scales):
     affine_grids = []
 
@@ -154,9 +125,9 @@ def make_filters(grids, num_scales, full_size, filter_func, clip_sizes):
     return torch.fft.fftshift(torch.stack(filters), dim=(-3, -2, -1))
 
 
-class GridFuncFilter(FilterBank3d):
+class GridFuncFilter3d(FilterBank3d):
     def __init__(self, size, num_scales, num_angles, clip_sizes=None):
-        super(GridFuncFilter, self).__init__(size, num_scales, num_angles)
+        super(GridFuncFilter3d, self).__init__(size, num_scales, num_angles)
 
         if clip_sizes is None:
             self.clip_sizes = [dyadic_clip_sizes(scale, size) for scale in range(num_scales)]
@@ -177,7 +148,7 @@ class GridFuncFilter(FilterBank3d):
         return torch.ones_like(g[:, :, :, :, 0])
 
     def to(self, device):
-        super(GridFuncFilter, self).to(device)
+        super(GridFuncFilter3d, self).to(device)
         self.grids = [g.to(device) for g in self.grids]
         self.filter_tensor = self.filter_tensor.to(device)
 
@@ -200,7 +171,7 @@ class SubNet3d(nn.Module):
         return x.reshape(b, s, s, s)
 
 
-class FourierSubNetFilters3d(GridFuncFilter):
+class FourierSubNetFilters3d(GridFuncFilter3d):
 
     def __init__(self, size, num_scales, num_angles, subnet=None,
                  symmetric=True, clip_sizes=None):
@@ -235,5 +206,41 @@ class FourierSubNetFilters3d(GridFuncFilter):
     def to(self, device):
         super(FourierSubNetFilters3d, self).to(device)
         self.subnet.to(device)
+
+
+class Morlet3d(GridFuncFilter3d):
+    def __init__(self, size, num_scales, num_angles, k0=None, covariance=None):
+        super(Morlet3d, self).__init__(size, num_scales, num_angles)
+
+        self.k0 = k0
+        self.covariance = covariance
+
+        if self.k0 is None:
+            self.k0 = torch.tensor([0, 0, 1], dtype=torch.float32).unsqueeze(0) * 0.5
+        if self.covariance is None:
+            self.covariance = torch.eye(3, dtype=torch.float32) * 100
+
+        self.update_filters()
+
+    def filter_function(self, grids, scale):
+        g = grids[scale]
+        return self._morlet(g.unsqueeze(-2), self.k0, self.covariance)
+
+    def _gaussian(self, k, covariance):
+        return torch.exp(-0.5 * k @ covariance @ k.transpose(-1, -2)) # shape (batch, size, size, size)
+
+    def _gabor(self, k, k0, covariance):
+        delta = k - k0[None, None, None, None, :, :]  # shape (batch, size, size, size, 1, 3)
+        return self._gaussian(delta, covariance).squeeze(-1).squeeze(-1)  # shape (batch, size, size, size)
+
+    def _morlet(self, k, k0, covariance):
+        # k is a field of 3d wave vectors (batch, size, size, size, 1, 3)
+        # k0 is the center frequency (1, 3)
+        # covariance is the covariance matrix (3, 3)
+        gabor = self._gabor(k, k0, covariance)
+        beta = self._gaussian(k0, covariance)
+        gaussian_part = self._gaussian(k, covariance).squeeze(-1).squeeze(-1)
+        morlet = gabor - beta * gaussian_part
+        return morlet
 
 

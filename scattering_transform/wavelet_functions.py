@@ -74,6 +74,40 @@ def morlet_wavelet(size, scale, angle, num_scales, num_angles):
     return stacked
 
 
+def morlet_wavelet_3d(size, scale, angle, num_scales, num_angles):
+    """Computes the morlet wavelet. I could make this more efficient by doing the 'extra' trick only for the
+    first couple j but this is hardly a bottleneck. """
+
+    extra = 3 if scale < 3 else 1
+    kpixels = torch.fft.fftfreq(size * extra)
+
+    kx, ky = torch.meshgrid(kpixels, kpixels)
+    kpos = torch.stack([kx, ky]).permute(1, 2, 0)[..., None] * extra * np.pi * 2
+
+    sigma = 0.8 * 2 ** scale
+    k0_mag = 3 * torch.pi / (4 * 2 ** scale)
+    s = 4 / num_angles
+    theta = torch.tensor((int(num_angles - num_angles / 2 - 1) - angle) * torch.pi / num_angles)
+
+    a = 1 / sigma
+    b = s / sigma
+    D = torch.tensor([[a, 0.],
+                      [0., b]])
+    V = rotation_matrix(theta)
+    A = D @ V
+
+    k0 = torch.tensor([k0_mag * torch.cos(theta), k0_mag * torch.sin(theta)])[None, None, :, None]
+
+    big_sigma = torch.inverse(A.T @ A)[None, None, :]
+    morl = morlet_function(kpos, k0, big_sigma)
+
+    chunked = (torch.tensor_split(b, extra, 0) for b in torch.tensor_split(morl, extra, 1))
+    chunked = [portion for tupl in chunked for portion in tupl]
+    stacked = torch.stack(chunked).sum(0)
+
+    return stacked
+
+
 # def normal(x):
 #     return 1 / np.sqrt(2 * np.pi) * np.exp(-np.swapaxes(x, -2, -1) @ x / 2)
 #
