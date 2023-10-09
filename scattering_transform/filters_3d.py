@@ -11,21 +11,21 @@ from .filters import SubNet
 # these are the healpy pixel centres for the 12 pixels in the base resolution
 # I don't want to need a healpy dependence for this, so I'm just hardcoding them here
 # format is (theta, phi) in radians where theta in [0, pi] and phi in [0, 2pi]
-# pixel_centres = [(0.8410686705679303, 0.7853981633974483),  # 0
-#                  (0.8410686705679303, 2.356194490192345), # 1
-#                  (0.8410686705679303, 3.926990816987241), # 2
-#                  (0.8410686705679303, 5.497787143782138), # 3
-#                  (1.5707963267948966, 0.0), # 4
-#                  (1.5707963267948966, 1.5707963267948966), # 5
-#                  (1.5707963267948966, 3.141592653589793), # 6
-#                  (1.5707963267948966, 4.71238898038469), # 7
-#                  (2.300523983021863, 0.7853981633974483), # 8
-#                  (2.300523983021863, 2.356194490192345), # 9
-#                  (2.300523983021863, 3.926990816987241), # 10
-#                  (2.300523983021863, 5.497787143782138)] # 11
+pixel_centres_12 = [(0.8410686705679303, 0.7853981633974483),  # 0
+                 (0.8410686705679303, 2.356194490192345), # 1
+                 (0.8410686705679303, 3.926990816987241), # 2
+                 (0.8410686705679303, 5.497787143782138), # 3
+                 (1.5707963267948966, 0.0), # 4
+                 (1.5707963267948966, 1.5707963267948966), # 5
+                 (1.5707963267948966, 3.141592653589793), # 6
+                 (1.5707963267948966, 4.71238898038469), # 7
+                 (2.300523983021863, 0.7853981633974483), # 8
+                 (2.300523983021863, 2.356194490192345), # 9
+                 (2.300523983021863, 3.926990816987241), # 10
+                 (2.300523983021863, 5.497787143782138)] # 11
 
 # here, I keep points on the top 4 corners and top and front faces
-pixel_centres = [(0.8410686705679303, 0.7853981633974483),   # 0
+pixel_centres_6 = [(0.8410686705679303, 0.7853981633974483),   # 0
                  (0.8410686705679303, 2.356194490192345),  # 1
                  (1.5707963267948966, 0.0),  # 4
                  (1.5707963267948966, 1.5707963267948966),  # 5
@@ -76,10 +76,15 @@ class FixedFilterBank3d(FilterBank3d):
         self.filter_tensor = self.filter_tensor.to(device)
 
 
-def make_grids_3d(sizes, num_scales):
+def make_grids_3d(sizes, num_scales, num_angles):
     affine_grids = []
 
-    angles = pixel_centres
+    if num_angles == 12:
+        angles = pixel_centres_12
+    elif num_angles == 6:
+        angles = pixel_centres_6
+    else:
+        raise ValueError("num_angles must be either 6 or 12")
 
     for scale in range(num_scales):
         scaled_size = sizes[scale]
@@ -133,7 +138,7 @@ class GridFuncFilter3d(FilterBank3d):
             self.clip_sizes = [dyadic_clip_sizes(scale, size) for scale in range(num_scales)]
         else:
             self.clip_sizes = clip_sizes
-        self.grids = make_grids_3d(self.clip_sizes, num_scales)
+        self.grids = make_grids_3d(self.clip_sizes, num_scales, num_angles)
         self.filter_tensor = None
 
     def update_filters(self):
@@ -173,8 +178,10 @@ class SubNet3d(nn.Module):
 
 class FourierSubNetFilters3d(GridFuncFilter3d):
 
-    def __init__(self, size, num_scales, num_angles, subnet=None,
+    def __init__(self, size, num_scales, subnet=None,
                  symmetric=True, clip_sizes=None):
+        num_angles = 6 if symmetric else 12
+
         super(FourierSubNetFilters3d, self).__init__(size, num_scales, num_angles, clip_sizes=clip_sizes)
 
         if subnet is None:
@@ -209,8 +216,8 @@ class FourierSubNetFilters3d(GridFuncFilter3d):
 
 
 class Morlet3d(GridFuncFilter3d):
-    def __init__(self, size, num_scales, num_angles, k0=None, covariance=None):
-        super(Morlet3d, self).__init__(size, num_scales, num_angles)
+    def __init__(self, size, num_scales, k0=None, covariance=None):
+        super(Morlet3d, self).__init__(size, num_scales, num_angles=6)
 
         self.k0 = k0
         self.covariance = covariance
