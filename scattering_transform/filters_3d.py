@@ -216,9 +216,9 @@ class Morlet3d(GridFuncFilter3d):
         self.covariance = covariance
 
         if self.k0 is None:
-            self.k0 = torch.tensor([0, 0, 1], dtype=torch.float32).unsqueeze(0) * 0.5
+            self.k0 = torch.tensor([0, 0, 1], dtype=torch.float32).unsqueeze(0) * 0.75
         if self.covariance is None:
-            self.covariance = torch.eye(3, dtype=torch.float32) * 100
+            self.covariance = torch.eye(3, dtype=torch.float32) * 20
 
         self.update_filters()
 
@@ -227,7 +227,7 @@ class Morlet3d(GridFuncFilter3d):
         return self._morlet(g.unsqueeze(-2), self.k0, self.covariance)
 
     def _gaussian(self, k, covariance):
-        return torch.exp(-0.5 * k @ covariance @ k.transpose(-1, -2)) # shape (batch, size, size, size)
+        return torch.exp(-0.5 * k @ covariance @ k.transpose(-1, -2))  # shape (batch, size, size, size)
 
     def _gabor(self, k, k0, covariance):
         delta = k - k0[None, None, None, None, :, :]  # shape (batch, size, size, size, 1, 3)
