@@ -37,7 +37,6 @@ def morlet_function(k, k0, sigma):
     return (gabor(k, k0, sigma) - admissibility_factor(k0, sigma) * gaussian(k, 0, sigma)).squeeze(-1).squeeze(-1)
 
 
-
 # Wavelet Functions
 
 def morlet_wavelet(size, scale, angle, num_scales, num_angles):

@@ -114,7 +114,6 @@ def pad_filters(x, full_size, scaled_size):
     return padded
 
 
-
 def crop_extra_nyquist(x):
     # I think I need this to enable the absolute value symmetry.
     return x[:, :-1, :-1, :-1]
@@ -213,6 +212,24 @@ class FourierSubNetFilters3d(GridFuncFilter3d):
     def to(self, device):
         super(FourierSubNetFilters3d, self).to(device)
         self.subnet.to(device)
+        self.update_filters()
+
+    def initialise_weights(self, target, num_epochs=1000):
+        optimiser = torch.optim.Adam(self.subnet.parameters(), lr=0.001)
+
+        print_every = num_epochs // 10
+        for epoch in range(num_epochs):
+
+            loss = torch.nn.functional.mse_loss(self.filter_tensor[:, 0], target)
+            loss.backward()
+            optimiser.step()
+            optimiser.zero_grad()
+
+            self.update_filters()
+
+            # use sceintific notation for loss
+            if epoch % print_every == 0:
+                print(f'Epoch {epoch} \t| Loss {loss.item():.2e}')
 
 
 class Morlet3d(GridFuncFilter3d):
