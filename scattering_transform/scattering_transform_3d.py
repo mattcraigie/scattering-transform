@@ -1,5 +1,5 @@
 import torch
-from torch.fft import fft2
+from torch.fft import fftn
 from .filters_3d import FilterBank3d
 from .general_functions import clip_fourier_field_3d, scattering_operation
 from .scattering_transform import ScatteringTransform2d
@@ -8,7 +8,7 @@ from .scattering_transform import ScatteringTransform2d
 class ScatteringTransform3d(ScatteringTransform2d):
     def __init__(self, filter_bank: FilterBank3d):
         """
-        A class to compute the scattering transform of a 2D field, for a given set of filters stored in a FilterBank
+        A class to compute the scattering transform of a 3D field, for a given set of filters stored in a FilterBank
         class.
 
         :param filter_bank: The filter bank to use for the scattering transform.
@@ -43,11 +43,11 @@ class ScatteringTransform3d(ScatteringTransform2d):
     def _first_order(self, fields):
         """
         Computes the first order scattering coefficients and the first order scattering fields.
-        :param fields: A tensor of shape (batch, channels, size, size) containing the fields to transform.
+        :param fields: A tensor of shape (batch, channels, size, size, size) containing the fields to transform.
         :return: A tuple containing the first order scattering coefficients and the first order scattering fields.
         """
 
-        fields_fourier = fft2(fields)
+        fields_fourier = fftn(fields, dim=(-3, -2, -1))
 
         first_order_coefficients = []
         first_order_scattering_fields = []
@@ -87,7 +87,7 @@ class ScatteringTransform3d(ScatteringTransform2d):
             for scale_2 in range(self.filter_bank.num_scales):
                 if scale_2 > scale_1:
 
-                    fields_fourier = fft2(field_list[scale_1])
+                    fields_fourier = fftn(field_list[scale_1], dim=(-3, -2, -1))
 
                     # clip the fields to the correct size
                     clip_size = self.filter_bank.clip_sizes[scale_2]
