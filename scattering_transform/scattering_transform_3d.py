@@ -112,7 +112,7 @@ class ScatteringTransform3d(ScatteringTransform2d):
                         torch.zeros(field_list[0].shape[:2] + (self.filter_bank.num_angles, self.filter_bank.num_angles)
                                     ).to(self.device))
 
-        # arrange the coefficients into a single tensor of shape (batch, channels, scale 1, scale 2, angle 1, angle 2)
+        # arrange the coefficients into a single tensor of shape (batch, channels, scale 1, angle 1, scale 2, angle 2)
         b, c, l1, l2 = second_order_coefficients[0].shape
         j1 = j2 = self.filter_bank.num_scales
         second_order_coefficients = torch.stack(second_order_coefficients, dim=-1)

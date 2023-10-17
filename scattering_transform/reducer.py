@@ -47,6 +47,7 @@ class Reducer(torch.nn.Module):
     def forward(self, s):
 
         s0, s1, s2 = s
+        s2 = s2.permute(0, 1, 2, 4, 3, 5)  # (b, c, j1, l1, j2, l2) -> (b, c, j1, j2, l1, l2)
 
         # shorthands for cleaner code
         sln = slice(None)  # SLice None, i.e. :
