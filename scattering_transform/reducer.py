@@ -47,13 +47,12 @@ class Reducer(torch.nn.Module):
     def forward(self, s):
 
         s0, s1, s2 = s
-        s2 = s2.permute(0, 1, 2, 4, 3, 5)  # (b, c, j1, l1, j2, l2) -> (b, c, j1, j2, l1, l2)
 
         # shorthands for cleaner code
         sln = slice(None)  # SLice None, i.e. :
         batch_dims = s0.ndim - 1
         batch_sizes = list(s0.shape[:-1])
-        bds = [sln]*batch_dims  # Batch Dim Slice nones
+        bds = [sln] * batch_dims  # Batch Dim Slice nones
 
         # Normalisation
         if self.normalise_s2:
@@ -62,7 +61,7 @@ class Reducer(torch.nn.Module):
         # Selecting only j2 > j1 entries
         scale_idx = torch.triu_indices(s1.shape[-2], s1.shape[-2], offset=1)
         s2 = s2[bds + [scale_idx[0], sln, scale_idx[1]]]
-        s2 = s2.permute([i + 1 for i in range(batch_dims)] + [0, s2.ndim-2, s2.ndim-1])
+        s2 = s2.permute([i + 1 for i in range(batch_dims)] + [0, s2.ndim - 2, s2.ndim - 1])
 
         if self.reduction is None or self.reduction == 'none':
             s1 = s1.flatten(-2, -1)
@@ -73,6 +72,7 @@ class Reducer(torch.nn.Module):
             s2 = s2.mean(dim=(-2, -1))
 
         elif self.reduction == 'ang_avg':
+
             s1 = s1.mean(-1)
             num_angles = s2.shape[-1]
 
@@ -85,9 +85,10 @@ class Reducer(torch.nn.Module):
             delta = torch.min(num_angles - delta, delta)
 
             s2_vals_all = []
-            for i in range(delta.min(), delta.max()+1):
+            for i in range(delta.min(), delta.max() + 1):
                 idx = torch.where(delta == i)  # find the indices of the angles that are i apart
-                s2_vals_all.append(s2[bds + [sln, idx[0], idx[1]]].mean(-1))  # take the average of everything with the same angle difference
+                s2_vals_all.append(s2[bds + [sln, idx[0], idx[1]]].mean(
+                    -1))  # take the average of everything with the same angle difference
             s2 = torch.cat(s2_vals_all, dim=-1)
 
         elif self.reduction == 'asymm_ang_avg':
