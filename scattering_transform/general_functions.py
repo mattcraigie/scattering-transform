@@ -3,12 +3,22 @@ import torch
 
 def scattering_operation(input_a: torch.Tensor, input_b: torch.Tensor) -> torch.Tensor:
     """
-    Convolves and takes the absolute value of two input fields
+    Convolves and takes the absolute value of two  2D input fields
     :param input_a: the first field in Fourier space (usually a physical field)
     :param input_b: the second field in Fourier space (usually a wavelet filter)
     :return: the output scattering field
     """
     return torch.fft.ifft2(input_a * input_b).abs()
+
+
+def scattering_operation_3d(input_a: torch.Tensor, input_b: torch.Tensor) -> torch.Tensor:
+    """
+    Convolves and takes the absolute value of two 3D input fields
+    :param input_a: the first field in Fourier space (usually a physical field)
+    :param input_b: the second field in Fourier space (usually a wavelet filter)
+    :return: the output scattering field
+    """
+    return torch.fft.ifftn(input_a * input_b, dim=(-3, -2, -1)).abs()
 
 
 def clip_fourier_field(field: torch.Tensor, final_size: int) -> torch.Tensor:

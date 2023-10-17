@@ -1,7 +1,7 @@
 import torch
 from torch.fft import fftn
 from .filters_3d import FilterBank3d
-from .general_functions import clip_fourier_field_3d, scattering_operation
+from .general_functions import clip_fourier_field_3d, scattering_operation_3d
 from .scattering_transform import ScatteringTransform2d
 
 
@@ -65,7 +65,7 @@ class ScatteringTransform3d(ScatteringTransform2d):
             scale_filter = scale_filter[None, None, ...]
 
             # apply the scattering operation
-            scattering_fields = scattering_operation(fields_fourier_clipped, scale_filter)
+            scattering_fields = scattering_operation_3d(fields_fourier_clipped, scale_filter)
             first_order_scattering_fields.append(scattering_fields)
 
             # compute the mean of the scattering fields to get the first order coefficients
@@ -101,7 +101,7 @@ class ScatteringTransform3d(ScatteringTransform2d):
                     scale_filter = scale_filter[None, None, None, ...]
 
                     # apply the scattering operation to the first order fields
-                    scattering_fields = scattering_operation(fields_fourier_clipped, scale_filter)
+                    scattering_fields = scattering_operation_3d(fields_fourier_clipped, scale_filter)
 
                     # compute the mean of the scattering fields to get the second order coefficients
                     coefficients = scattering_fields.mean((-3, -2, -1))
