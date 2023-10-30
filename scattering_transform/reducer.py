@@ -1,13 +1,13 @@
 import torch
 from .scattering_transform import ScatteringTransform2d
-from .scattering_transform_3d import ScatteringTransform3d
+from .scattering_transform_3d import ScatteringTransform3d, ThirdOrderScatteringTransform3d
 
 
 class Reducer(torch.nn.Module):
 
     # todo: add in a method that takes in an index and outputs the J1, L1, J2, L2 etc that it corresponds to.
 
-    def __init__(self, filters, reduction, normalise_s2=False, filters_3d=False):
+    def __init__(self, filters, reduction, normalise_s2=False, filters_3d=False, third_order=False):
         """Class that reduces the scattering coefficients based on the symmetry in the field. It also performs some
         normalisation. The main reason to use a class rather than a function is so that we can pre-calculate the
         number of scattering coefficients, given the reduction.
@@ -32,11 +32,15 @@ class Reducer(torch.nn.Module):
 
         self.reduction = reduction
         self.normalise_s2 = normalise_s2
+        self.third_order = third_order
 
         # run a test field through the scattering transform to work out the required number of outputs
         if filters_3d:
             test_field = torch.randn(1, 1, filters.size, filters.size, filters.size).to(filters.device)
-            st = ScatteringTransform3d(filters)
+            if not third_order:
+                st = ScatteringTransform3d(filters)
+            else:
+                st = ThirdOrderScatteringTransform3d(filters)
         else:
             test_field = torch.randn(1, 1, filters.size, filters.size).to(filters.device)
             st = ScatteringTransform2d(filters)
@@ -46,64 +50,98 @@ class Reducer(torch.nn.Module):
 
     def forward(self, s):
 
-        s0, s1, s2 = s
+        if not self.third_order:
 
-        # shorthands for cleaner code
-        sln = slice(None)  # SLice None, i.e. :
-        batch_dims = s0.ndim - 1
-        batch_sizes = list(s0.shape[:-1])
-        bds = [sln] * batch_dims  # Batch Dim Slice nones
+            s0, s1, s2 = s
 
-        # Normalisation
-        if self.normalise_s2:
-            s2 = s2 / s1[bds + [sln, sln, None, None]]
+            # shorthands for cleaner code
+            sln = slice(None)  # SLice None, i.e. :
+            batch_dims = s0.ndim - 1
+            batch_sizes = list(s0.shape[:-1])
+            bds = [sln] * batch_dims  # Batch Dim Slice nones
 
-        # Selecting only j2 > j1 entries
-        scale_idx = torch.triu_indices(s1.shape[-2], s1.shape[-2], offset=1)
-        s2 = s2[bds + [scale_idx[0], sln, scale_idx[1]]]
-        s2 = s2.permute([i + 1 for i in range(batch_dims)] + [0, s2.ndim - 2, s2.ndim - 1])
+            # Normalisation
+            if self.normalise_s2:
+                s2 = s2 / s1[bds + [sln, sln, None, None]]
 
-        if self.reduction is None or self.reduction == 'none':
+            # Selecting only j2 > j1 entries
+            scale_idx = torch.triu_indices(s1.shape[-2], s1.shape[-2], offset=1)
+            s2 = s2[bds + [scale_idx[0], sln, scale_idx[1]]]
+            s2 = s2.permute([i + 1 for i in range(batch_dims)] + [0, s2.ndim - 2, s2.ndim - 1])
+
+            if self.reduction is None or self.reduction == 'none':
+                s1 = s1.flatten(-2, -1)
+                s2 = s2.flatten(-3, -1)
+
+            elif self.reduction == 'rot_avg':
+                s1 = s1.mean(-1)
+                s2 = s2.mean(dim=(-2, -1))
+
+            elif self.reduction == 'ang_avg':
+
+                s1 = s1.mean(-1)
+                num_angles = s2.shape[-1]
+
+                # Calculate the distance between each angle in a 2D tensor. Angles left are equivalent to angles right,
+                # which is why we take the absolute value.
+                delta = torch.abs(torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :])
+
+                # Use the rotational symmetry of the filters (e.g. for J=4, 3 angles apart is equivalent to 1 angle apart,
+                # when you got the other way, so we can just take the min of the two).
+                delta = torch.min(num_angles - delta, delta)
+
+                s2_vals_all = []
+                for i in range(delta.min(), delta.max() + 1):
+                    idx = torch.where(delta == i)  # find the indices of the angles that are i apart
+                    s2_vals_all.append(s2[bds + [sln, idx[0], idx[1]]].mean(
+                        -1))  # take the average of everything with the same angle difference
+                s2 = torch.cat(s2_vals_all, dim=-1)
+
+            elif self.reduction == 'asymm_ang_avg':
+                s1 = s1.mean(-1)
+                num_angles = s2.shape[-1]
+
+                # calculate the distance between each angle in a 2D tensor. Due to asymmetry, angles left are not equivalent
+                # to angles right.
+                delta = torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :]
+
+                s2_vals_all = []
+                for i in range(delta.min(), delta.max()+1):
+                    idx = torch.where(delta == i)  # find the indices of the angles that are i apart
+                    part = s2[bds + [sln, idx[0], idx[1]]]
+                    s2_vals_all.append(part.mean(-1))
+                s2 = torch.cat(s2_vals_all, dim=-1)
+
+            return torch.cat((s0, s1, s2), dim=batch_dims)
+
+        else:
+
+            s0, s1, s2, s3 = s
+
+            # shorthands for cleaner code
+            sln = slice(None)  # SLice None, i.e. :
+            batch_dims = s0.ndim - 1
+            batch_sizes = list(s0.shape[:-1])
+            bds = [sln] * batch_dims  # Batch Dim Slice nones
+
+            # Normalisation
+            if self.normalise_s2:
+                s2 = s2 / s1[bds + [sln, sln, None, None]]
+
+            # Selecting only j2 > j1 entries
+            scale_idx = torch.triu_indices(s1.shape[-2], s1.shape[-2], offset=1)
+            s2 = s2[bds + [scale_idx[0], sln, scale_idx[1]]]
+            s2 = s2.permute([i + 1 for i in range(batch_dims)] + [0, s2.ndim - 2, s2.ndim - 1])
+
+            J = s1.shape[1]
+            j1, j2, j3 = torch.meshgrid(torch.arange(J), torch.arange(J), torch.arange(J))
+            j1_j2_j3_mask = (j1 < j2) & (j2 < j3)
+            j1_j2_j3_mask_indices = torch.where(j1_j2_j3_mask)
+            s3 = s3[:, :, j1_j2_j3_mask_indices[0], :, j1_j2_j3_mask_indices[1], :, j1_j2_j3_mask_indices[2], :]
+            s3 = s3.permute(1, 2, 0, 3, 4, 5)
+
             s1 = s1.flatten(-2, -1)
             s2 = s2.flatten(-3, -1)
+            s3 = s3.flatten(-4, -1)
 
-        elif self.reduction == 'rot_avg':
-            s1 = s1.mean(-1)
-            s2 = s2.mean(dim=(-2, -1))
-
-        elif self.reduction == 'ang_avg':
-
-            s1 = s1.mean(-1)
-            num_angles = s2.shape[-1]
-
-            # Calculate the distance between each angle in a 2D tensor. Angles left are equivalent to angles right,
-            # which is why we take the absolute value.
-            delta = torch.abs(torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :])
-
-            # Use the rotational symmetry of the filters (e.g. for J=4, 3 angles apart is equivalent to 1 angle apart,
-            # when you got the other way, so we can just take the min of the two).
-            delta = torch.min(num_angles - delta, delta)
-
-            s2_vals_all = []
-            for i in range(delta.min(), delta.max() + 1):
-                idx = torch.where(delta == i)  # find the indices of the angles that are i apart
-                s2_vals_all.append(s2[bds + [sln, idx[0], idx[1]]].mean(
-                    -1))  # take the average of everything with the same angle difference
-            s2 = torch.cat(s2_vals_all, dim=-1)
-
-        elif self.reduction == 'asymm_ang_avg':
-            s1 = s1.mean(-1)
-            num_angles = s2.shape[-1]
-
-            # calculate the distance between each angle in a 2D tensor. Due to asymmetry, angles left are not equivalent
-            # to angles right.
-            delta = torch.arange(num_angles)[:, None] - torch.arange(num_angles)[None, :]
-
-            s2_vals_all = []
-            for i in range(delta.min(), delta.max()+1):
-                idx = torch.where(delta == i)  # find the indices of the angles that are i apart
-                part = s2[bds + [sln, idx[0], idx[1]]]
-                s2_vals_all.append(part.mean(-1))
-            s2 = torch.cat(s2_vals_all, dim=-1)
-
-        return torch.cat((s0, s1, s2), dim=batch_dims)
+            return torch.cat((s0, s1, s2, s3), dim=batch_dims)
