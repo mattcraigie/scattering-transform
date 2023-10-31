@@ -133,10 +133,11 @@ class Reducer(torch.nn.Module):
             s2 = s2[bds + [scale_idx[0], sln, scale_idx[1]]]
             s2 = s2.permute([i + 1 for i in range(batch_dims)] + [0, s2.ndim - 2, s2.ndim - 1])
 
-            J = s1.shape[1]
+            J = s1.shape[2]
             j1, j2, j3 = torch.meshgrid(torch.arange(J), torch.arange(J), torch.arange(J))
             j1_j2_j3_mask = (j1 < j2) & (j2 < j3)
             j1_j2_j3_mask_indices = torch.where(j1_j2_j3_mask)
+
             s3 = s3[:, :, j1_j2_j3_mask_indices[0], :, j1_j2_j3_mask_indices[1], :, j1_j2_j3_mask_indices[2], :]
             s3 = s3.permute(1, 2, 0, 3, 4, 5)
 
