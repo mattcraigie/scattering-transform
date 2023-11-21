@@ -274,6 +274,9 @@ class FourierSubNetFilters(GridFuncFilter):
             clipped_morlet = ClippedMorlet(size, num_scales, num_angles)
             self.initialise_weights(clipped_morlet.filter_tensor[:, num_angles - 1])
 
+        if full_rotation:
+            self.num_angles = num_angles * 2
+
     def filter_function(self, grid, scale):
         g = grid[scale]
 
