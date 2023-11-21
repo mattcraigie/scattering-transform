@@ -161,6 +161,11 @@ def make_duplicate_rotations(x):
     return torch.cat([x, torch.rot90(x, k=-1, dims=[1, 2])], dim=0)  # rotating 90 saves calcs
 
 
+def make_duplicate_rotations_full(x):
+    dr = make_duplicate_rotations(x)
+    return torch.cat([dr, torch.rot90(dr, k=-2, dims=[1, 2])], dim=0)  # rotating 180 saves calcs
+
+
 def crop_extra_nyquist(x):
     # the rotations work by rotating about the centre then cropping out the bottom and right 'extra' freqs
     # this retains the nyquist (which is in the topmost row and leftmost column) and allows us to use
@@ -168,11 +173,17 @@ def crop_extra_nyquist(x):
     return x[:, :-1, :-1]
 
 
-def make_filters(grids, num_scales, full_size, filter_func, clip_sizes):
+def make_filters(grids, num_scales, full_size, filter_func, clip_sizes, full_rotation=False):
+    # full rotation makes it so that the filters are rotated all the way around, not just 180 degrees
     filters = []
     for scale in range(num_scales):
         half_rotated_filters = filter_func(grids, scale)
-        fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
+
+        if full_rotation:
+            fully_rotated_filters = make_duplicate_rotations_full(half_rotated_filters)
+        else:
+            fully_rotated_filters = make_duplicate_rotations(half_rotated_filters)
+
         nyquist_cropped_filters = crop_extra_nyquist(fully_rotated_filters)
         padded_filters = pad_filters(nyquist_cropped_filters, full_size, clip_sizes[scale])
         filters.append(padded_filters)
@@ -180,8 +191,10 @@ def make_filters(grids, num_scales, full_size, filter_func, clip_sizes):
 
 
 class GridFuncFilter(FilterBank):
-    def __init__(self, size, num_scales, num_angles, clip_sizes=None):
+    def __init__(self, size, num_scales, num_angles, clip_sizes=None, full_rotation=False):
         super(GridFuncFilter, self).__init__(size, num_scales, num_angles)
+
+        self.full_rotation = full_rotation
 
         if num_angles % 2 != 0:
             raise ValueError("num_angles must be even. This allows a significant speedup.")
@@ -195,7 +208,7 @@ class GridFuncFilter(FilterBank):
 
     def update_filters(self):
         self.filter_tensor = make_filters(self.grids, self.num_scales, self.size, self.filter_function,
-                                          self.clip_sizes)
+                                          self.clip_sizes, full_rotation=self.full_rotation)
         self.clip_filters()
 
     def filter_function(self, grid, scale):
@@ -240,8 +253,8 @@ class LowPass(GridFuncFilter):
 class FourierSubNetFilters(GridFuncFilter):
 
     def __init__(self, size, num_scales, num_angles, subnet=None, scale_invariant=False, init_morlet=True,
-                 symmetric=True, periodic=False, clip_sizes=None):
-        super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles, clip_sizes=clip_sizes)
+                 symmetric=True, periodic=False, clip_sizes=None, full_rotation=False):
+        super(FourierSubNetFilters, self).__init__(size, num_scales, num_angles, clip_sizes=clip_sizes, full_rotation=full_rotation)
 
         if subnet is None:
             if scale_invariant:

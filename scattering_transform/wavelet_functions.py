@@ -172,7 +172,3 @@ def skew_wavelet(size, scale, angle, num_scales, num_angles):
     return torch.from_numpy(wavelet_k)
 
 
-
-
-
-

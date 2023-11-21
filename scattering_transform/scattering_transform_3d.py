@@ -317,3 +317,36 @@ class ThirdOrderScatteringTransform3d(ScatteringTransform2d):
 
         return c1, c2, c3
 
+
+class FirstOrderScatteringTransform3d(ScatteringTransform2d):
+    def __init__(self, filter_bank: FilterBank3d):
+        """
+        A class to compute the scattering transform of a 3D field, for a given set of filters stored in a FilterBank
+        class.
+
+        :param filter_bank: The filter bank to use for the scattering transform.
+        """
+
+        super(FirstOrderScatteringTransform3d, self).__init__(filter_bank)
+
+        # add the clip scaling factors - adjusted for 3D
+        self.clip_scaling_factors = [self.filter_bank.clip_sizes[j] ** 3 / self.filter_bank.size ** 3
+                                     for j in range(self.filter_bank.num_scales)]
+        self.clip_scaling_factors = torch.tensor(self.clip_scaling_factors)
+
+    def _scattering_transform(self, fields):
+
+        assert len(fields.shape) == 5, "The input fields should have shape (batch, channels, size, size, size)"
+
+        # the zeroth order coefficient
+        coeffs_0 = torch.mean(fields, dim=(-3, -2, -1)).unsqueeze(-1)
+        coeffs_1, fields_1 = self._first_order(fields)
+
+        # rescale the coefficients to account for clipping
+        coeffs_1 = self._rescale_coeffs(coeffs_1)
+
+        return torch.cat([coeffs_0, coeffs_1], dim=-1)
+
+    def _rescale_coeffs(self, c1):
+
+        return c1 * self.clip_scaling_factors[None, None, :, None]
