@@ -46,6 +46,11 @@ class FixedFilterBank(FilterBank):
         super(FixedFilterBank, self).to(device)
         self.filter_tensor = self.filter_tensor.to(device)
 
+        assert self.filters is not None, "Must call clip_filters before calling to(device). " \
+                                         "Usually, call this in super class __init__"
+        self.filters = [filter.to(device) for filter in self.filters]
+
+
 
 class Morlet(FixedFilterBank):
     def __init__(self, size, num_scales, num_angles):
