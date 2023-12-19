@@ -298,6 +298,7 @@ class FourierSubNetFilters(GridFuncFilter):
     def to(self, device):
         super(FourierSubNetFilters, self).to(device)
         self.subnet.to(device)
+        self.update_filters()
 
     def initialise_weights(self, target, num_epochs=1000):
         optimiser = torch.optim.Adam(self.subnet.parameters(), lr=0.01)
